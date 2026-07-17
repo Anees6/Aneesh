@@ -16,6 +16,11 @@ app.listen(PORT, () => {
 // നിങ്ങളുടെ ടെലിഗ്രാം ബോട്ട് ടോക്കൺ
 const bot = new Telegraf('8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4');
 
+// /start കമാൻഡ് അടിക്കുമ്പോൾ മറുപടി നൽകാൻ
+bot.start((ctx) => {
+  ctx.reply('ഹലോ! ഞാൻ സജീവമാണ്. ഗ്രൂപ്പിൽ പുതിയ ആളുകൾ വരുമ്പോൾ ഞാൻ അവർക്ക് സ്വാഗതം ആശംസിക്കും! 🤖');
+});
+
 // പുതിയ ആളുകൾ ഗ്രൂപ്പിൽ വരുമ്പോൾ വെൽക്കം മെസ്സേജ് അയക്കാനുള്ള കോഡ്
 bot.on('new_chat_members', (ctx) => {
   ctx.message.new_chat_members.forEach((user) => {
