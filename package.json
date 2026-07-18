@@ -1,13 +1,13 @@
 {
-  "name": "telegram-bot",
+  "name": "rose-management-bot",
   "version": "1.0.0",
-  "description": "My Telegram Bot",
+  "description": "Telegram Group Management Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "telegraf": "^4.16.3"
+    "grammy": "^1.23.0"
   }
 }
