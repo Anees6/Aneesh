@@ -128,7 +128,7 @@ bot.callbackQuery("help_settings", async (ctx) => {
         "<b>⚙️ Configuration:</b>\n\n" +
         "🔹 `/antilink on` - Delete all messages except links.\n" +
         "🔹 `/antilink off` - Allow all normal messages.\n" +
-        "🔹 `/autodel on` - Auto delete links & mute sender for 15 mins.\n" +
+        "🔹 `/autodel on` - Auto delete links & mute sender for 5 hours.\n" +
         "🔹 `/autodel off` - Stop auto deleting links.\n" +
         "🔹 `/setlinktime [start] [end]` - Set restricted hours (e.g., `/setlinktime 22 6`).";
     const backKb = new InlineKeyboard().text("⬅️ Back", "help_main");
@@ -414,17 +414,18 @@ bot.on('message:text', async (ctx) => {
     const entities = ctx.message.entities || [];
     const hasLink = entities.some(e => e.type === 'url' || e.type === 'text_link');
 
-    // കസ്റ്റം ഫീച്ചർ: സെറ്റ് ചെയ്ത സമയത്തിന് ഉള്ളിലാണെങ്കിൽ ലിങ്ക് ഡിലീറ്റ് ചെയ്യലും 15 മിനിറ്റ് മ്യൂട്ട് ചെയ്യലും
+    // കസ്റ്റം ഫീച്ചർ: സെറ്റ് ചെയ്ത സമയത്തിന് ഉള്ളിലാണെങ്കിൽ ലിങ്ക് ഡിലീറ്റ് ചെയ്യലും 5 മണിക്കൂർ മ്യൂട്ട് ചെയ്യലും
     if (hasLink && autodelStatus && !isAdminUser) {
         if (isWithinTimeRange()) {
-            // സമയപരിധിക്ക് ഉള്ളിൽ - മ്യൂട്ട് ചെയ്യും, 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യും
+            // സമയപരിധിക്ക് ഉള്ളിൽ - 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യും
             deleteLinkAfter15Minutes(ctx, ctx.message.message_id);
 
-            const muteUntilTime = Math.floor(Date.now() / 1000) + 15 * 60;
+            // യൂസറെ 5 മണിക്കൂറത്തേക്ക് മ്യൂട്ട് ചെയ്യുന്നു (Current Time + 5 Hours)
+            const muteUntilTime = Math.floor(Date.now() / 1000) + 5 * 60 * 60;
             try {
                 await ctx.restrictChatMember(ctx.from.id, { can_send_messages: false }, { until_date: muteUntilTime });
                 
-                const alertText = `⏳ <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a> has been muted for 15 minutes for sending a link during restricted hours!</b>`;
+                const alertText = `⏳ <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a> has been muted for 5 hours for sending a link during restricted hours!</b>`;
                 const sentAlert = await ctx.reply(alertText, { parse_mode: "HTML" });
                 
                 deleteAfter15Seconds(ctx, sentAlert.message_id);
@@ -436,7 +437,6 @@ bot.on('message:text', async (ctx) => {
             const successText = `✅ <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a>, restricted hours are over. Your link is allowed!</b>`;
             const sentSuccess = await ctx.reply(successText, { parse_mode: "HTML" });
             
-            // ഈ വിജയ സന്ദേശം 15 സെക്കൻഡിന് ശേഷം ഡിലീറ്റ് ആകും
             deleteAfter15Seconds(ctx, sentSuccess.message_id);
         }
     }
