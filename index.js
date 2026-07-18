@@ -15,6 +15,7 @@ const bot = new Bot(TOKEN);
 let lastWarningMessageId = null;
 let lastWelcomeMessageId = null;
 let antilinkStatus = true;
+let autodelStatus = true; // ലിങ്ക് ഓട്ടോ ഡിലീറ്റ് ചെയ്യാനുള്ള സ്റ്റാറ്റസ് (Default: true)
 const userWarnings = {};
 
 // 15 സെക്കൻഡിന് ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
@@ -26,6 +27,17 @@ function deleteAfter15Seconds(ctx, messageId) {
             // മെസ്സേജ് നേരത്തെ ഡിലീറ്റ് ചെയ്യപ്പെടുകയോ ബോട്ടിന് പെർമിഷൻ ഇല്ലാതിരിക്കുകയോ ചെയ്താൽ എറർ കാണിക്കാതിരിക്കാൻ
         }
     }, 15000); // 15000 മില്ലിസെക്കൻഡ് = 15 സെക്കൻഡ്
+}
+
+// 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+function deleteLinkAfter15Minutes(ctx, messageId) {
+    setTimeout(async () => {
+        try {
+            await ctx.api.deleteMessage(ctx.chat.id, messageId);
+        } catch (e) {
+            // എറർ ഒഴിവാക്കാൻ
+        }
+    }, 900000); // 900000 മില്ലിസെക്കൻഡ് = 15 മിനിറ്റ്
 }
 
 // Admin Checker Function
@@ -93,7 +105,9 @@ bot.callbackQuery("help_settings", async (ctx) => {
     const text = 
         "<b>⚙️ Configuration:</b>\n\n" +
         "🔹 `/antilink on` - Delete all messages except links.\n" +
-        "🔹 `/antilink off` - Allow all normal messages.";
+        "🔹 `/antilink off` - Allow all normal messages.\n" +
+        "🔹 `/autodel on` - Auto delete links after 15 mins.\n" +
+        "🔹 `/autodel off` - Stop deleting links after 15 mins.";
     const backKb = new InlineKeyboard().text("⬅️ Back", "help_main");
     await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backKb });
     await ctx.answerCallbackQuery();
@@ -298,6 +312,29 @@ bot.command('antilink', async (ctx) => {
     }
 });
 
+// ഓട്ടോ ലിങ്ക് ഡിലീറ്റ് ഓൺ/ഓഫ് ചെയ്യാനുള്ള കമാൻഡ്
+bot.command('autodel', async (ctx) => {
+    if (!await isAdmin(ctx)) {
+        const sent = await ctx.reply("❌ Admins only!");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+    const args = ctx.match ? ctx.match.trim().toLowerCase() : '';
+    
+    if (args === 'on') {
+        autodelStatus = true;
+        const sent = await ctx.reply("✅ <b>Link Auto-Delete active. User links will be deleted after 15 minutes!</b>", { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
+    } else if (args === 'off') {
+        autodelStatus = false;
+        const sent = await ctx.reply("🛑 <b>Link Auto-Delete disabled. Links will not be deleted.</b>", { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
+    } else {
+        const sent = await ctx.reply("⚠️ Use: `/autodel on` or `/autodel off`");
+        deleteAfter15Seconds(ctx, sent.message_id);
+    }
+});
+
 // --- WELCOME & TEXT PURGE HANDLERS ---
 
 bot.on('message:new_chat_members', async (ctx) => {
@@ -320,11 +357,20 @@ bot.on('message:new_chat_members', async (ctx) => {
 });
 
 bot.on('message:text', async (ctx) => {
-    if (!antilinkStatus) return;
-    if (await isAdmin(ctx)) return;
+    const isAdminUser = await isAdmin(ctx);
 
+    // ലിങ്ക് ചെക്ക് ചെയ്യൽ
     const entities = ctx.message.entities || [];
     const hasLink = entities.some(e => e.type === 'url' || e.type === 'text_link');
+
+    // കസ്റ്റം ഫീച്ചർ: 15 മിനിറ്റിനു ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യൽ (സാധാരണ യൂസർമാർക്ക് മാത്രം)
+    if (hasLink && autodelStatus && !isAdminUser) {
+        deleteLinkAfter15Minutes(ctx, ctx.message.message_id);
+    }
+
+    if (!antilinkStatus) return;
+    if (isAdminUser) return;
+
     if (hasLink) return;
 
     try {
