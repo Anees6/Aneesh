@@ -15,7 +15,13 @@ const bot = new Bot(TOKEN);
 let lastWarningMessageId = null;
 let lastWelcomeMessageId = null;
 let antilinkStatus = true;
-let autodelStatus = true; // ലിങ്ക് ഓട്ടോ ഡിലീറ്റ് ചെയ്യാനുള്ള സ്റ്റാറ്റസ് (Default: true)
+let autodelStatus = true; 
+
+// ടൈം സെറ്റിംഗ്സ് (Default: രാത്രി 10 മണി മുതൽ രാവിലെ 6 മണി വരെ)
+let startHour = 22; 
+let endHour = 6;    
+const TIMEZONE = "Asia/Kolkata"; // ഇന്ത്യയിലെ സമയക്രമം അനുസരിച്ച് പ്രവർത്തിക്കാൻ
+
 const userWarnings = {};
 
 // 15 സെക്കൻഡിന് ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
@@ -24,9 +30,9 @@ function deleteAfter15Seconds(ctx, messageId) {
         try {
             await ctx.api.deleteMessage(ctx.chat.id, messageId);
         } catch (e) {
-            // മെസ്സേജ് നേരത്തെ ഡിലീറ്റ് ചെയ്യപ്പെടുകയോ ബോട്ടിന് പെർമിഷൻ ഇല്ലാതിരിക്കുകയോ ചെയ്താൽ എറർ കാണിക്കാതിരിക്കാൻ
+            // എറർ ഒഴിവാക്കാൻ
         }
-    }, 15000); // 15000 മില്ലിസെക്കൻഡ് = 15 സെക്കൻഡ്
+    }, 15000);
 }
 
 // 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
@@ -37,7 +43,24 @@ function deleteLinkAfter15Minutes(ctx, messageId) {
         } catch (e) {
             // എറർ ഒഴിവാക്കാൻ
         }
-    }, 900000); // 900000 മില്ലിസെക്കൻഡ് = 15 മിനിറ്റ്
+    }, 900000); // 15 മിനിറ്റ്
+}
+
+// സമയപരിധിക്ക് ഉള്ളിലാണോ എന്ന് നോക്കുന്ന ഫങ്ഷൻ
+function isWithinTimeRange() {
+    const now = new Date();
+    // സെർവർ ഏത് രാജ്യത്തായാലും ഇന്ത്യൻ സമയം കൃത്യമായി കിട്ടാൻ
+    const localTimeStr = now.toLocaleString("en-US", { timeZone: TIMEZONE });
+    const localDate = new Date(localTimeStr);
+    const currentHour = localDate.getHours();
+
+    if (startHour > endHour) {
+        // രാത്രി മുതൽ രാവിലെ വരെയുള്ള സമയം (ഉദാഹരണത്തിന്: 22 മണി മുതൽ 6 മണി വരെ)
+        return currentHour >= startHour || currentHour < endHour;
+    } else {
+        // ഒരേ ദിവസത്തെ സമയം (ഉദാഹരണത്തിന്: രാവിലെ 10 മണി മുതൽ വൈകുന്നേരം 4 മണി വരെ)
+        return currentHour >= startHour && currentHour < endHour;
+    }
 }
 
 // Admin Checker Function
@@ -106,8 +129,9 @@ bot.callbackQuery("help_settings", async (ctx) => {
         "<b>⚙️ Configuration:</b>\n\n" +
         "🔹 `/antilink on` - Delete all messages except links.\n" +
         "🔹 `/antilink off` - Allow all normal messages.\n" +
-        "🔹 `/autodel on` - Auto delete links after 15 mins.\n" +
-        "🔹 `/autodel off` - Stop deleting links after 15 mins.";
+        "🔹 `/autodel on` - Auto delete links & mute sender for 15 mins.\n" +
+        "🔹 `/autodel off` - Stop auto deleting links.\n" +
+        "🔹 `/setlinktime [start] [end]` - Set restricted hours (e.g., `/setlinktime 22 6`).";
     const backKb = new InlineKeyboard().text("⬅️ Back", "help_main");
     await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backKb });
     await ctx.answerCallbackQuery();
@@ -312,7 +336,6 @@ bot.command('antilink', async (ctx) => {
     }
 });
 
-// ഓട്ടോ ലിങ്ക് ഡിലീറ്റ് ഓൺ/ഓഫ് ചെയ്യാനുള്ള കമാൻഡ്
 bot.command('autodel', async (ctx) => {
     if (!await isAdmin(ctx)) {
         const sent = await ctx.reply("❌ Admins only!");
@@ -323,16 +346,47 @@ bot.command('autodel', async (ctx) => {
     
     if (args === 'on') {
         autodelStatus = true;
-        const sent = await ctx.reply("✅ <b>Link Auto-Delete active. User links will be deleted after 15 minutes!</b>", { parse_mode: "HTML" });
+        const sent = await ctx.reply("✅ <b>Link Auto-Delete & Time Mute system activated!</b>", { parse_mode: "HTML" });
         deleteAfter15Seconds(ctx, sent.message_id);
     } else if (args === 'off') {
         autodelStatus = false;
-        const sent = await ctx.reply("🛑 <b>Link Auto-Delete disabled. Links will not be deleted.</b>", { parse_mode: "HTML" });
+        const sent = await ctx.reply("🛑 <b>Link Auto-Delete & Time Mute system deactivated!</b>", { parse_mode: "HTML" });
         deleteAfter15Seconds(ctx, sent.message_id);
     } else {
         const sent = await ctx.reply("⚠️ Use: `/autodel on` or `/autodel off`");
         deleteAfter15Seconds(ctx, sent.message_id);
     }
+});
+
+// പുതിയ കമാൻഡ്: ലിങ്ക് നിരോധിക്കേണ്ട സമയം സെറ്റ് ചെയ്യാൻ
+bot.command('setlinktime', async (ctx) => {
+    if (!await isAdmin(ctx)) {
+        const sent = await ctx.reply("❌ Admins only!");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+    
+    const matches = ctx.match ? ctx.match.trim().split(/\s+/) : [];
+    if (matches.length !== 2) {
+        const sent = await ctx.reply("⚠️ <b>Usage:</b> `/setlinktime [Start Hour] [End Hour]`\nExample: `/setlinktime 22 6` (For 10 PM to 6 AM)", { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+
+    const start = parseInt(matches[0]);
+    const end = parseInt(matches[1]);
+
+    if (isNaN(start) || isNaN(end) || start < 0 || start > 23 || end < 0 || end > 23) {
+        const sent = await ctx.reply("⚠️ Hours must be between 0 and 23. (24-Hour Format)");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+
+    startHour = start;
+    endHour = end;
+
+    const sent = await ctx.reply(`✅ <b>Mute time successfully updated!</b>\nLinks restricted between: <b>${startHour}:00</b> and <b>${endHour}:00</b> (IST)`, { parse_mode: "HTML" });
+    deleteAfter15Seconds(ctx, sent.message_id);
 });
 
 // --- WELCOME & TEXT PURGE HANDLERS ---
@@ -348,7 +402,6 @@ bot.on('message:new_chat_members', async (ctx) => {
             const sentMessage = await ctx.reply(welcomeText, { parse_mode: "HTML" });
             lastWelcomeMessageId = sentMessage.message_id;
             
-            // വെൽക്കം മെസ്സേജും 15 സെക്കൻഡിൽ ഡിലീറ്റ് ചെയ്യണമെങ്കിൽ താഴത്തെ വരി ഉപയോഗിക്കാം
             deleteAfter15Seconds(ctx, sentMessage.message_id);
         } catch (err) {
             console.error(err);
@@ -363,9 +416,25 @@ bot.on('message:text', async (ctx) => {
     const entities = ctx.message.entities || [];
     const hasLink = entities.some(e => e.type === 'url' || e.type === 'text_link');
 
-    // കസ്റ്റം ഫീച്ചർ: 15 മിനിറ്റിനു ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യൽ (സാധാരണ യൂസർമാർക്ക് മാത്രം)
+    // കസ്റ്റം ഫീച്ചർ: സെറ്റ് ചെയ്ത സമയത്തിന് ഉള്ളിലാണെങ്കിൽ ലിങ്ക് ഡിലീറ്റ് ചെയ്യലും 15 മിനിറ്റ് മ്യൂട്ട് ചെയ്യലും
     if (hasLink && autodelStatus && !isAdminUser) {
-        deleteLinkAfter15Minutes(ctx, ctx.message.message_id);
+        if (isWithinTimeRange()) {
+            // 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+            deleteLinkAfter15Minutes(ctx, ctx.message.message_id);
+
+            // യൂസറെ 15 മിനിറ്റത്തേക്ക് മ്യൂട്ട് ചെയ്യുന്നു (Current Time + 15 Minutes)
+            const muteUntilTime = Math.floor(Date.now() / 1000) + 15 * 60;
+            try {
+                await ctx.restrictChatMember(ctx.from.id, { can_send_messages: false }, { until_date: muteUntilTime });
+                
+                const alertText = `⏳ <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a> has been muted for 15 minutes for sending a link during restricted hours!</b>`;
+                const sentAlert = await ctx.reply(alertText, { parse_mode: "HTML" });
+                
+                deleteAfter15Seconds(ctx, sentAlert.message_id);
+            } catch (muteError) {
+                console.error("Mute failed:", muteError.message);
+            }
+        }
     }
 
     if (!antilinkStatus) return;
