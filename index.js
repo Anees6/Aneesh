@@ -49,7 +49,6 @@ function deleteLinkAfter15Minutes(ctx, messageId) {
 // സമയപരിധിക്ക് ഉള്ളിലാണോ എന്ന് നോക്കുന്ന ഫങ്ഷൻ
 function isWithinTimeRange() {
     const now = new Date();
-    // സെർവർ ഏത് രാജ്യത്തായാലും ഇന്ത്യൻ സമയം കൃത്യമായി കിട്ടാൻ
     const localTimeStr = now.toLocaleString("en-US", { timeZone: TIMEZONE });
     const localDate = new Date(localTimeStr);
     const currentHour = localDate.getHours();
@@ -358,7 +357,6 @@ bot.command('autodel', async (ctx) => {
     }
 });
 
-// പുതിയ കമാൻഡ്: ലിങ്ക് നിരോധിക്കേണ്ട സമയം സെറ്റ് ചെയ്യാൻ
 bot.command('setlinktime', async (ctx) => {
     if (!await isAdmin(ctx)) {
         const sent = await ctx.reply("❌ Admins only!");
@@ -419,10 +417,9 @@ bot.on('message:text', async (ctx) => {
     // കസ്റ്റം ഫീച്ചർ: സെറ്റ് ചെയ്ത സമയത്തിന് ഉള്ളിലാണെങ്കിൽ ലിങ്ക് ഡിലീറ്റ് ചെയ്യലും 15 മിനിറ്റ് മ്യൂട്ട് ചെയ്യലും
     if (hasLink && autodelStatus && !isAdminUser) {
         if (isWithinTimeRange()) {
-            // 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+            // സമയപരിധിക്ക് ഉള്ളിൽ - മ്യൂട്ട് ചെയ്യും, 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യും
             deleteLinkAfter15Minutes(ctx, ctx.message.message_id);
 
-            // യൂസറെ 15 മിനിറ്റത്തേക്ക് മ്യൂട്ട് ചെയ്യുന്നു (Current Time + 15 Minutes)
             const muteUntilTime = Math.floor(Date.now() / 1000) + 15 * 60;
             try {
                 await ctx.restrictChatMember(ctx.from.id, { can_send_messages: false }, { until_date: muteUntilTime });
@@ -434,6 +431,13 @@ bot.on('message:text', async (ctx) => {
             } catch (muteError) {
                 console.error("Mute failed:", muteError.message);
             }
+        } else {
+            // സമയപരിധി കഴിഞ്ഞാൽ - ലിങ്ക് അനുവദിക്കും, ഒപ്പം റെസ്പോണ്ട് മെസ്സേജ് അയക്കും
+            const successText = `✅ <b><a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a>, restricted hours are over. Your link is allowed!</b>`;
+            const sentSuccess = await ctx.reply(successText, { parse_mode: "HTML" });
+            
+            // ഈ വിജയ സന്ദേശം 15 സെക്കൻഡിന് ശേഷം ഡിലീറ്റ് ആകും
+            deleteAfter15Seconds(ctx, sentSuccess.message_id);
         }
     }
 
