@@ -1,131 +1,80 @@
-const { Telegraf } = require('telegraf');
-const express = require('express');
+import asyncio
+import re
+from threading import Thread
+from flask import Flask
+from telegram import Update, ChatPermissions
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+# Flask വെബ് സെർവർ സെറ്റപ്പ് (Render-ൽ ലിങ്ക് കിട്ടാൻ വേണ്ടി)
+app = Flask(name)
 
-app.get('/', (req, res) => {
-  res.send('Bot is up and running!');
-});
+@app.route('/')
+def home():
+    return "Bot is alive!"
 
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
-const bot = new Telegraf('8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4');
+# നിങ്ങളുടെ ബോട്ട് ടോക്കൺ ഇവിടെ ചേർത്തിട്ടുണ്ട്
+BOT_TOKEN = "8673412670:AAFW2QTdkHH_LxecEzJNE-SkflJZe1X8Y0g"
+LINK_REGEX = re.compile(r'https?://\S+|www\.\S+')
 
-// ഓൺ/ഓഫ് സെറ്റിങ്സ് സൂക്ഷിക്കാൻ (ഡിഫോൾട്ട് ആയി ഓൺ ആണ്)
-let welcomeEnabled = true;
-let autoCleanEnabled = true;
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("ബോട്ട് ആക്ടീവ് ആണ്!")
 
-bot.start((ctx) => {
-  ctx.reply('ഹലോ! ഞാൻ റെഡിയാണ്. ഗ്രൂപ്പിൽ പുതിയ ആളുകൾ വരുമ്പോൾ ഞാൻ അവരെ സ്വാഗതം ചെയ്യും! 🤖');
-});
+async def delete_warning(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    try:
+        await context.bot.delete_message(chat_id=job.chat_id, message_id=job.data)
+    except Exception as e:
+        print(f"Error deleting message: {e}")
 
-// വെൽക്കം മെസ്സേജ് കൺട്രോൾ ചെയ്യാൻ (/new on / off)
-bot.command('new', (ctx) => {
-  const text = ctx.message.text.split(' ')[1];
-  if (text === 'on') {
-    welcomeEnabled = true;
-    ctx.reply('✅ പുതിയ ആളുകൾ വരുമ്പോൾ സ്വാഗതം ചെയ്യുന്ന ഫീച്ചർ ഓൺ ആക്കിയിരിക്കുന്നു!');
-  } else if (text === 'off') {
-    welcomeEnabled = false;
-    ctx.reply('❌ പുതിയ ആളുകൾ വരുമ്പോൾ സ്വാഗതം ചെയ്യുന്ന ഫീച്ചർ ഓഫ് ആക്കിയിരിക്കുന്നു!');
-  } else {
-    ctx.reply('ശരിയായ കമാൻഡ്:\n• `/new on`\n• `/new off`', { parse_mode: 'Markdown' });
-  }
-});
+async def filter_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    chat = update.effective_chat
+    user = update.effective_user
 
-// മീഡിയ/ലിങ്ക് ഡിലീറ്റിംഗ് കൺട്രോൾ ചെയ്യാൻ (/clean on / off)
-bot.command('clean', (ctx) => {
-  const text = ctx.message.text.split(' ')[1];
-  if (text === 'on') {
-    autoCleanEnabled = true;
-    ctx.reply('✅ ഗ്രൂപ്പിലെ ലിങ്കുകളും മീഡിയകളും 15 മിനിറ്റിന് ശേഷം സ്വയം ഡിലീറ്റ് ചെയ്യുന്ന ഫീച്ചർ ഓൺ ആക്കിയിരിക്കുന്നു!');
-  } else if (text === 'off') {
-    autoCleanEnabled = false;
-    ctx.reply('❌ ഓട്ടോമാറ്റിക് ഡിലീറ്റിംഗ് ഫീച്ചർ ഓഫ് ആക്കിയിരിക്കുന്നു!');
-  } else {
-    ctx.reply('ശരിയായ കമാൻഡ്:\n• `/clean on`\n• `/clean off`', { parse_mode: 'Markdown' });
-  }
-});
+    if chat.type not in ["group", "supergroup"]:
+        return
+    if user.is_bot or (message.text and LINK_REGEX.search(message.text)):
+        return
 
-// പുതിയ ആളുകൾ ഗ്രൂപ്പിൽ വരുമ്പോൾ
-bot.on('new_chat_members', async (ctx) => {
-  if (!welcomeEnabled) return;
+    try:
+        # 1. ലിങ്ക് അല്ലാത്ത മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
+        await message.delete()
 
-  ctx.message.new_chat_members.forEach(async (user) => {
-    if (user.is_bot) return;
+        # 2. യൂസറെ മ്യൂട്ട് ചെയ്യുന്നു
+        mute_permissions = ChatPermissions(can_send_messages=False)
+        await chat.restrict_member(user_id=user.id, permissions=mute_permissions)
 
-    const userId = user.id;
-    const firstName = user.first_name;
-    const welcomeText = `ഹലോ [${firstName}](tg://user?id=${userId}), നമ്മുടെ ഗ്രൂപ്പിലേക്ക് സ്വാഗതം! 🎉\n\n` +
-                        `⚠️ *ഗ്രൂപ്പ് നിയമം:* ഈ ഗ്രൂപ്പിൽ ലിങ്കുകൾ ഇടാൻ മാത്രമേ സാധിക്കുകയുള്ളൂ. മറ്റു മെസ്സേജുകൾ അയച്ചാൽ ഞങ്ങൾ mute ചെയ്യുന്നതായിരിക്കും.`;
+        # 3. വാണിംഗ് മെസ്സേജ് അയക്കുന്നു
+        warning_msg = await context.bot.send_message(
+            chat_id=chat.id,
+            text=f"⚠️ {user.mention_html()}, ഈ ഗ്രൂപ്പിൽ ലിങ്കുകൾ മാത്രമേ അനുവദിക്കൂ! നിങ്ങളുടെ മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് നിങ്ങളെ മ്യൂട്ട് ചെയ്തിരിക്കുന്നു.",
+            parse_mode="HTML"
+        )
 
-    try {
-      const sentMessage = await ctx.replyWithMarkdown(welcomeText);
+        # 4. 1 മിനിറ്റിന് (60 സെക്കൻഡ്) ശേഷം വാണിംഗ് മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
+        context.job_queue.run_once(
+            delete_warning, 
+            when=60, 
+            chat_id=chat.id, 
+            data=warning_msg.message_id
+        )
+    except Exception as e:
+        print(f"Error: {e}")
 
-      // 1 മിനിറ്റിന് ശേഷം വെൽക്കം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യും
-      setTimeout(async () => {
-        try {
-          await ctx.telegram.deleteMessage(ctx.chat.id, sentMessage.message_id);
-        } catch (err) {
-          console.error('Failed to delete welcome message:', err);
-        }
-      }, 60000);
+def main():
+    # വെബ് സെർവർ സ്റ്റാർട്ട് ചെയ്യുന്നു
+    Thread(target=run_flask).start()
 
-    } catch (error) {
-      console.error('Error sending welcome message:', error);
-    }
-  });
-});
+    # ബോട്ട് സ്റ്റാർട്ട് ചെയ്യുന്നു
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, filter_messages))
 
-// ഗ്രൂപ്പിൽ വരുന്ന മറ്റെല്ലാ മെസ്സേജുകളും പരിശോധിക്കാൻ
-bot.on('message', async (ctx) => {
-  if (!autoCleanEnabled) return; // ഫീച്ചർ ഓഫ് ആണെങ്കിൽ ഒന്നും ചെയ്യേണ്ട
+    print("Bot is running...")
+    application.run_polling()
 
-  const message = ctx.message;
-  let shouldDelete = false;
-
-  // 1. ലിങ്കുകൾ ഉണ്ടോ എന്ന് നോക്കുന്നു
-  if (message.entities) {
-    const hasLink = message.entities.some(entity => entity.type === 'url' || entity.type === 'text_link');
-    if (hasLink) shouldDelete = true;
-  }
-
-  // 2. മീഡിയ ഫയലുകൾ (ഫോട്ടോ, വീഡിയോ, ഓഡിയോ, ഡോക്യുമെന്റ്, വോയ്സ്) ഉണ്ടോ എന്ന് നോക്കുന്നു
-  if (
-    message.photo || 
-    message.video || 
-    message.document || 
-    message.audio || 
-    message.voice || 
-    message.video_note ||
-    message.sticker
-  ) {
-    shouldDelete = true;
-  }
-
-  // മീഡിയയോ ലിങ്കോ ആണെങ്കിൽ 15 മിനിറ്റിന് ശേഷം ഡിലീറ്റ് ചെയ്യുക
-  if (shouldDelete) {
-    const chatId = ctx.chat.id;
-    const messageId = message.message_id;
-
-    // 15 മിനിറ്റ് = 15 * 60 * 1000 = 900,000 മില്ലിസെക്കൻഡ്
-    setTimeout(async () => {
-      try {
-        await ctx.telegram.deleteMessage(chatId, messageId);
-        console.log(`Deleted media/link message ${messageId} after 15 minutes.`);
-      } catch (err) {
-        console.error(`Failed to delete message ${messageId}:`, err);
-      }
-    }, 900000);
-  }
-});
-
-bot.launch()
-  .then(() => console.log('Telegram Bot Status: Active'))
-  .catch((err) => console.error('Bot launch error:', err));
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+if name == "main":
+    main()
