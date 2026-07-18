@@ -17,6 +17,17 @@ let lastWelcomeMessageId = null;
 let antilinkStatus = true;
 const userWarnings = {};
 
+// 15 സെക്കൻഡിന് ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+function deleteAfter15Seconds(ctx, messageId) {
+    setTimeout(async () => {
+        try {
+            await ctx.api.deleteMessage(ctx.chat.id, messageId);
+        } catch (e) {
+            // മെസ്സേജ് നേരത്തെ ഡിലീറ്റ് ചെയ്യപ്പെടുകയോ ബോട്ടിന് പെർമിഷൻ ഇല്ലാതിരിക്കുകയോ ചെയ്താൽ എറർ കാണിക്കാതിരിക്കാൻ
+        }
+    }, 15000); // 15000 മില്ലിസെക്കൻഡ് = 15 സെക്കൻഡ്
+}
+
 // Admin Checker Function
 async function isAdmin(ctx) {
     if (ctx.chat.type === 'private') return false;
@@ -41,7 +52,8 @@ const mainKeyboard = new InlineKeyboard()
 
 // --- START & HELP COMMANDS ---
 bot.command(['start', 'help'], async (ctx) => {
-    await ctx.reply(helpText, { parse_mode: "HTML", reply_markup: mainKeyboard });
+    const sent = await ctx.reply(helpText, { parse_mode: "HTML", reply_markup: mainKeyboard });
+    deleteAfter15Seconds(ctx, sent.message_id);
 });
 
 // --- INLINE KEYBOARD CALLBACK HANDLERS ---
@@ -90,79 +102,121 @@ bot.callbackQuery("help_settings", async (ctx) => {
 // --- MANAGEMENT FUNCTIONS (ROSE STYLE) ---
 
 bot.command('ban', async (ctx) => {
-    if (!await isAdmin(ctx)) return ctx.reply("❌ You need to be an admin to use this.");
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to ban them.");
+    if (!await isAdmin(ctx)) {
+        const sent = await ctx.reply("❌ You need to be an admin to use this.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+    if (!ctx.message.reply_to_message) {
+        const sent = await ctx.reply("⚠️ Reply to a user's message to ban them.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
     
     const user = ctx.message.reply_to_message.from;
     try {
         await ctx.banChatMember(user.id);
-        await ctx.reply(`⚡ <b>Done. Locked out ${user.first_name}!</b>`, { parse_mode: "HTML" });
+        const sent = await ctx.reply(`⚡ <b>Done. Locked out ${user.first_name}!</b>`, { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } catch (err) {
-        await ctx.reply(`❌ Error: ${err.message}`);
+        const sent = await ctx.reply(`❌ Error: ${err.message}`);
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
 bot.command('unban', async (ctx) => {
     if (!await isAdmin(ctx)) return;
     const userId = parseInt(ctx.match);
-    if (isNaN(userId)) return ctx.reply("⚠️ Usage: `/unban [user_id]`");
+    if (isNaN(userId)) {
+        const sent = await ctx.reply("⚠️ Usage: `/unban [user_id]`");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
 
     try {
         await ctx.unbanChatMember(userId);
-        await ctx.reply(`✅ <b>User ${userId} has been pardoned.</b>`, { parse_mode: "HTML" });
+        const sent = await ctx.reply(`✅ <b>User ${userId} has been pardoned.</b>`, { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } catch (err) {
-        await ctx.reply(`❌ Error: ${err.message}`);
+        const sent = await ctx.reply(`❌ Error: ${err.message}`);
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
 bot.command('kick', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to kick them.");
+    if (!ctx.message.reply_to_message) {
+        const sent = await ctx.reply("⚠️ Reply to a user's message to kick them.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
 
     const user = ctx.message.reply_to_message.from;
     try {
         await ctx.banChatMember(user.id);
         await ctx.unbanChatMember(user.id);
-        await ctx.reply(`🏃 <b>Removed ${user.first_name} from the chat.</b>`, { parse_mode: "HTML" });
+        const sent = await ctx.reply(`🏃 <b>Removed ${user.first_name} from the chat.</b>`, { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } catch (err) {
-        await ctx.reply(`❌ Error: ${err.message}`);
+        const sent = await ctx.reply(`❌ Error: ${err.message}`);
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
 bot.command('mute', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to mute them.");
+    if (!ctx.message.reply_to_message) {
+        const sent = await ctx.reply("⚠️ Reply to a user's message to mute them.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
 
     const user = ctx.message.reply_to_message.from;
     try {
         await ctx.restrictChatMember(user.id, { can_send_messages: false });
-        await ctx.reply(`🤐 <b>Shhh... ${user.first_name} is now silenced permanently!</b>`, { parse_mode: "HTML" });
+        const sent = await ctx.reply(`🤐 <b>Shhh... ${user.first_name} is now silenced permanently!</b>`, { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } catch (err) {
-        await ctx.reply(`❌ Error: ${err.message}`);
+        const sent = await ctx.reply(`❌ Error: ${err.message}`);
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
 bot.command('tmute', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to temporary mute.");
+    if (!ctx.message.reply_to_message) {
+        const sent = await ctx.reply("⚠️ Reply to a user's message to temporary mute.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
     
     const minutes = parseInt(ctx.match);
-    if (isNaN(minutes) || minutes <= 0) return ctx.reply("⚠️ Specify time! Example: `/tmute 10`");
+    if (isNaN(minutes) || minutes <= 0) {
+        const sent = await ctx.reply("⚠️ Specify time! Example: `/tmute 10`");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
 
     const user = ctx.message.reply_to_message.from;
     const untilTime = Math.floor(Date.now() / 1000) + minutes * 60;
 
     try {
         await ctx.restrictChatMember(user.id, { can_send_messages: false }, { until_date: untilTime });
-        await ctx.reply(`⏳ <b>Silenced ${user.first_name} for ${minutes} minutes.</b>`, { parse_mode: "HTML" });
+        const sent = await ctx.reply(`⏳ <b>Silenced ${user.first_name} for ${minutes} minutes.</b>`, { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } catch (err) {
-        await ctx.reply(`❌ Error: ${err.message}`);
+        const sent = await ctx.reply(`❌ Error: ${err.message}`);
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
 bot.command('unmute', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to unmute.");
+    if (!ctx.message.reply_to_message) {
+        const sent = await ctx.reply("⚠️ Reply to a user's message to unmute.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
 
     const user = ctx.message.reply_to_message.from;
     try {
@@ -172,15 +226,21 @@ bot.command('unmute', async (ctx) => {
             can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
             can_add_web_page_previews: true
         });
-        await ctx.reply(`🔊 <b>${user.first_name} can speak again!</b>`, { parse_mode: "HTML" });
+        const sent = await ctx.reply(`🔊 <b>${user.first_name} can speak again!</b>`, { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } catch (err) {
-        await ctx.reply(`❌ Error: ${err.message}`);
+        const sent = await ctx.reply(`❌ Error: ${err.message}`);
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
 bot.command('warn', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to warn them.");
+    if (!ctx.message.reply_to_message) {
+        const sent = await ctx.reply("⚠️ Reply to a user's message to warn them.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
 
     const user = ctx.message.reply_to_message.from;
     if (!userWarnings[user.id]) userWarnings[user.id] = 0;
@@ -190,36 +250,51 @@ bot.command('warn', async (ctx) => {
         try {
             await ctx.restrictChatMember(user.id, { can_send_messages: false });
             userWarnings[user.id] = 0;
-            await ctx.reply(`🚷 <b>${user.first_name} reached 3/3 warnings and has been muted!</b>`, { parse_mode: "HTML" });
+            const sent = await ctx.reply(`🚷 <b>${user.first_name} reached 3/3 warnings and has been muted!</b>`, { parse_mode: "HTML" });
+            deleteAfter15Seconds(ctx, sent.message_id);
         } catch (e) {
-            await ctx.reply(`❌ Error auto-muting: ${e.message}`);
+            const sent = await ctx.reply(`❌ Error auto-muting: ${e.message}`);
+            deleteAfter15Seconds(ctx, sent.message_id);
         }
     } else {
-        await ctx.reply(`⚠️ <b>User ${user.first_name} has been warned (${userWarnings[user.id]}/3). Don't break the rules!</b>`, { parse_mode: "HTML" });
+        const sent = await ctx.reply(`⚠️ <b>User ${user.first_name} has been warned (${userWarnings[user.id]}/3). Don't break the rules!</b>`, { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
 bot.command('resetwarn', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user to reset warnings.");
+    if (!ctx.message.reply_to_message) {
+        const sent = await ctx.reply("⚠️ Reply to a user to reset warnings.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
     
     const user = ctx.message.reply_to_message.from;
     userWarnings[user.id] = 0;
-    await ctx.reply(`✅ <b>Warnings reset for ${user.first_name}. Clean slate!</b>`, { parse_mode: "HTML" });
+    const sent = await ctx.reply(`✅ <b>Warnings reset for ${user.first_name}. Clean slate!</b>`, { parse_mode: "HTML" });
+    deleteAfter15Seconds(ctx, sent.message_id);
 });
 
 bot.command('antilink', async (ctx) => {
-    if (!await isAdmin(ctx)) return ctx.reply("❌ Admins only!");
+    if (!await isAdmin(ctx)) {
+        const sent = await ctx.reply("❌ Admins only!");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
     const args = ctx.match ? ctx.match.trim().toLowerCase() : '';
     
     if (args === 'on') {
         antilinkStatus = true;
-        await ctx.reply("✅ <b>Anti-link active. Non-link messages will be purged!</b>", { parse_mode: "HTML" });
+        const sent = await ctx.reply("✅ <b>Anti-link active. Non-link messages will be purged!</b>", { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } else if (args === 'off') {
         antilinkStatus = false;
-        await ctx.reply("🛑 <b>Anti-link disabled. All messages allowed.</b>", { parse_mode: "HTML" });
+        const sent = await ctx.reply("🛑 <b>Anti-link disabled. All messages allowed.</b>", { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
     } else {
-        await ctx.reply("⚠️ Use: `/antilink on` or `/antilink off`");
+        const sent = await ctx.reply("⚠️ Use: `/antilink on` or `/antilink off`");
+        deleteAfter15Seconds(ctx, sent.message_id);
     }
 });
 
@@ -235,6 +310,9 @@ bot.on('message:new_chat_members', async (ctx) => {
             const welcomeText = `✨ <b>Welcome</b> <a href="tg://user?id=${newMember.id}">${newMember.first_name}</a> <b>to the group! Stay respectful.</b>`;
             const sentMessage = await ctx.reply(welcomeText, { parse_mode: "HTML" });
             lastWelcomeMessageId = sentMessage.message_id;
+            
+            // വെൽക്കം മെസ്സേജും 15 സെക്കൻഡിൽ ഡിലീറ്റ് ചെയ്യണമെങ്കിൽ താഴത്തെ വരി ഉപയോഗിക്കാം
+            deleteAfter15Seconds(ctx, sentMessage.message_id);
         } catch (err) {
             console.error(err);
         }
