@@ -1,23 +1,23 @@
 const express = require('express');
-const { Bot, GrammyError, HttpError } = require('grammy');
+const { Bot, InlineKeyboard, GrammyError, HttpError } = require('grammy');
 
-// --- EXPRESS WEB SERVER SETUP (FOR HOSTING) ---
+// --- WEB SERVER FOR HOSTING ---
 const app = express();
 const PORT = process.env.PORT || 8080;
-app.get('/', (req, res) => res.send("Bot is running successfully!"));
+app.get('/', (req, res) => res.send("Rose-Style Management Bot is running!"));
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-// --- TELEGRAM BOT SETUP ---
+// --- BOT SETUP ---
 const TOKEN = "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4";
 const bot = new Bot(TOKEN);
 
-// ഡാറ്റ സൂക്ഷിക്കാനുള്ള ഗ്ലോബൽ വേരിയബിളുകൾ
+// Global Variables
 let lastWarningMessageId = null;
 let lastWelcomeMessageId = null;
-let antilinkStatus = true; // ആന്റി-ലിങ്ക് ഫീച്ചർ ഓൺ/ഓഫ് ചെയ്യാൻ
-const userWarnings = {}; // യൂസർമാരുടെ വാണിംഗ് കൗണ്ട് സൂക്ഷിക്കാൻ { userId: count }
+let antilinkStatus = true;
+const userWarnings = {};
 
-// അഡ്മിൻ ആണോ എന്ന് പരിശോധിക്കാനുള്ള ഫങ്ഷൻ
+// Admin Checker Function
 async function isAdmin(ctx) {
     if (ctx.chat.type === 'private') return false;
     try {
@@ -28,40 +28,80 @@ async function isAdmin(ctx) {
     }
 }
 
-// --- 1. START COMMAND (ALL COMMANDS LIST) ---
-bot.command('start', async (ctx) => {
-    await ctx.reply(
-        "👋 Hello! I am your Advanced Group Management Bot.\n\n" +
-        "📜 **Available Commands (Reply to a user's message):**\n" +
-        "🔹 `/ban` - Ban a user from the group\n" +
-        "🔹 `/unban [user_id]` - Unban a user\n" +
-        "🔹 `/kick` - Kick a user out\n" +
-        "🔹 `/mute` - Mute a user permanently\n" +
-        "🔹 `/tmute [minutes]` - Mute for a specific time (e.g., `/tmute 10`)\n" +
-        "🔹 `/unmute` - Unmute a user\n" +
-        "🔹 `/warn` - Give a warning (3 warnings = Automatic Mute)\n" +
-        "🔹 `/resetwarn` - Reset a user's warnings\n\n" +
-        "⚙️ **Admin Configuration:**\n" +
-        "🔹 `/antilink on` - Delete all messages except links\n" +
-        "🔹 `/antilink off` - Allow all messages"
-    );
+// Rose Style Start/Help Text
+const helpText = 
+    "<b>Hey there! I am a Group Management Bot styled like Rose.</b>\n\n" +
+    "I can help you manage your groups easily with warnings, mutes, and bans.\n\n" +
+    "<b>Click the buttons below to explore my commands:</b>";
+
+const mainKeyboard = new InlineKeyboard()
+    .text("🛡️ Admin Cmds", "help_admin")
+    .text("⚠️ Warnings", "help_warn").row()
+    .text("⚙️ Settings", "help_settings");
+
+// --- START & HELP COMMANDS ---
+bot.command(['start', 'help'], async (ctx) => {
+    await ctx.reply(helpText, { parse_mode: "HTML", reply_markup: mainKeyboard });
 });
 
-// --- 2. BAN COMMAND ---
+// --- INLINE KEYBOARD CALLBACK HANDLERS ---
+bot.callbackQuery("help_main", async (ctx) => {
+    await ctx.editMessageText(helpText, { parse_mode: "HTML", reply_markup: mainKeyboard });
+    await ctx.answerCallbackQuery();
+});
+
+bot.callbackQuery("help_admin", async (ctx) => {
+    const text = 
+        "<b>🛡️ Admin Commands:</b>\n" +
+        "<i>(Reply to a user's message to execute)</i>\n\n" +
+        "🔹 `/ban` - Bans the user from the group.\n" +
+        "🔹 `/unban [user_id]` - Unbans the user.\n" +
+        "🔹 `/kick` - Kicks the user out of the group.\n" +
+        "🔹 `/mute` - Mutes the user permanently.\n" +
+        "🔹 `/tmute [mins]` - Mutes user for temporary time (e.g. `/tmute 10`).\n" +
+        "🔹 `/unmute` - Unmutes the user.";
+    const backKb = new InlineKeyboard().text("⬅️ Back", "help_main");
+    await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backKb });
+    await ctx.answerCallbackQuery();
+});
+
+bot.callbackQuery("help_warn", async (ctx) => {
+    const text = 
+        "<b>⚠️ Warning System:</b>\n" +
+        "<i>Keep your group clean with warnings.</i>\n\n" +
+        "🔹 `/warn` - Warns a user. (Reply to message)\n" +
+        "🔹 `/resetwarn` - Resets all warnings of that user.\n\n" +
+        "📌 <b>Note:</b> When a user reaches <b>3 warnings</b>, they will be automatically muted by the bot.";
+    const backKb = new InlineKeyboard().text("⬅️ Back", "help_main");
+    await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backKb });
+    await ctx.answerCallbackQuery();
+});
+
+bot.callbackQuery("help_settings", async (ctx) => {
+    const text = 
+        "<b>⚙️ Configuration:</b>\n\n" +
+        "🔹 `/antilink on` - Delete all messages except links.\n" +
+        "🔹 `/antilink off` - Allow all normal messages.";
+    const backKb = new InlineKeyboard().text("⬅️ Back", "help_main");
+    await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backKb });
+    await ctx.answerCallbackQuery();
+});
+
+// --- MANAGEMENT FUNCTIONS (ROSE STYLE) ---
+
 bot.command('ban', async (ctx) => {
-    if (!await isAdmin(ctx)) return ctx.reply("❌ You do not have permission to use this command!");
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Please reply to the message of the user you want to ban.");
+    if (!await isAdmin(ctx)) return ctx.reply("❌ You need to be an admin to use this.");
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to ban them.");
     
     const user = ctx.message.reply_to_message.from;
     try {
         await ctx.banChatMember(user.id);
-        await ctx.reply(`🔒 <b>${user.first_name}</b> has been banned from the group.`, { parse_mode: "HTML" });
+        await ctx.reply(`⚡ <b>Done. Locked out ${user.first_name}!</b>`, { parse_mode: "HTML" });
     } catch (err) {
-        await ctx.reply(`❌ Failed to ban: ${err.message}`);
+        await ctx.reply(`❌ Error: ${err.message}`);
     }
 });
 
-// --- 3. UNBAN COMMAND ---
 bot.command('unban', async (ctx) => {
     if (!await isAdmin(ctx)) return;
     const userId = parseInt(ctx.match);
@@ -69,137 +109,122 @@ bot.command('unban', async (ctx) => {
 
     try {
         await ctx.unbanChatMember(userId);
-        await ctx.reply(`✅ User (ID: ${userId}) has been unbanned.`);
+        await ctx.reply(`✅ <b>User ${userId} has been pardoned.</b>`, { parse_mode: "HTML" });
     } catch (err) {
-        await ctx.reply(`❌ Failed to unban: ${err.message}`);
+        await ctx.reply(`❌ Error: ${err.message}`);
     }
 });
 
-// --- 4. KICK COMMAND ---
 bot.command('kick', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Please reply to the user you want to kick.");
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to kick them.");
 
     const user = ctx.message.reply_to_message.from;
     try {
         await ctx.banChatMember(user.id);
         await ctx.unbanChatMember(user.id);
-        await ctx.reply(`🏃 <b>${user.first_name}</b> has been kicked out.`, { parse_mode: "HTML" });
+        await ctx.reply(`🏃 <b>Removed ${user.first_name} from the chat.</b>`, { parse_mode: "HTML" });
     } catch (err) {
-        await ctx.reply(`❌ Failed to kick: ${err.message}`);
+        await ctx.reply(`❌ Error: ${err.message}`);
     }
 });
 
-// --- 5. PERMANENT MUTE ---
 bot.command('mute', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Please reply to the user you want to mute.");
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to mute them.");
 
     const user = ctx.message.reply_to_message.from;
     try {
         await ctx.restrictChatMember(user.id, { can_send_messages: false });
-        await ctx.reply(`🔇 <b>${user.first_name}</b> has been muted permanently.`, { parse_mode: "HTML" });
+        await ctx.reply(`🤐 <b>Shhh... ${user.first_name} is now silenced permanently!</b>`, { parse_mode: "HTML" });
     } catch (err) {
-        await ctx.reply(`❌ Failed to mute: ${err.message}`);
+        await ctx.reply(`❌ Error: ${err.message}`);
     }
 });
 
-// --- 6. TEMPORARY MUTE (ടൈം സെറ്റ് ചെയ്യാൻ) ---
 bot.command('tmute', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Please reply to the user you want to temporary mute.");
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to temporary mute.");
     
     const minutes = parseInt(ctx.match);
-    if (isNaN(minutes) || minutes <= 0) return ctx.reply("⚠️ Please specify minutes. Example: `/tmute 10`");
+    if (isNaN(minutes) || minutes <= 0) return ctx.reply("⚠️ Specify time! Example: `/tmute 10`");
 
     const user = ctx.message.reply_to_message.from;
     const untilTime = Math.floor(Date.now() / 1000) + minutes * 60;
 
     try {
         await ctx.restrictChatMember(user.id, { can_send_messages: false }, { until_date: untilTime });
-        await ctx.reply(`⏳ <b>${user.first_name}</b> has been muted for <b>${minutes} minutes</b>.`, { parse_mode: "HTML" });
+        await ctx.reply(`⏳ <b>Silenced ${user.first_name} for ${minutes} minutes.</b>`, { parse_mode: "HTML" });
     } catch (err) {
-        await ctx.reply(`❌ Failed to temporary mute: ${err.message}`);
+        await ctx.reply(`❌ Error: ${err.message}`);
     }
 });
 
-// --- 7. UNMUTE COMMAND ---
 bot.command('unmute', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Please reply to the user you want to unmute.");
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to unmute.");
 
     const user = ctx.message.reply_to_message.from;
     try {
         await ctx.restrictChatMember(user.id, {
-            can_send_messages: true,
-            can_send_audios: true,
-            can_send_documents: true,
-            can_send_photos: true,
-            can_send_videos: true,
-            can_send_video_notes: true,
-            can_send_voice_notes: true,
-            can_send_polls: true,
-            can_send_other_messages: true,
+            can_send_messages: true, can_send_audios: true, can_send_documents: true,
+            can_send_photos: true, can_send_videos: true, can_send_video_notes: true,
+            can_send_voice_notes: true, can_send_polls: true, can_send_other_messages: true,
             can_add_web_page_previews: true
         });
-        await ctx.reply(`🔊 <b>${user.first_name}</b> has been unmuted.`, { parse_mode: "HTML" });
+        await ctx.reply(`🔊 <b>${user.first_name} can speak again!</b>`, { parse_mode: "HTML" });
     } catch (err) {
-        await ctx.reply(`❌ Failed to unmute: ${err.message}`);
+        await ctx.reply(`❌ Error: ${err.message}`);
     }
 });
 
-// --- 8. WARNING SYSTEM (Max 3 Warnings -> Auto Mute) ---
 bot.command('warn', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Please reply to the user you want to warn.");
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user's message to warn them.");
 
     const user = ctx.message.reply_to_message.from;
-    
-    // വാണിംഗ് കൗണ്ട് കൂട്ടുന്നു
     if (!userWarnings[user.id]) userWarnings[user.id] = 0;
     userWarnings[user.id] += 1;
 
     if (userWarnings[user.id] >= 3) {
-        // 3 വാണിംഗ് ആയാൽ ഓട്ടോമാറ്റിക് മ്യൂട്ട് ചെയ്യും
         try {
             await ctx.restrictChatMember(user.id, { can_send_messages: false });
-            userWarnings[user.id] = 0; // കൗണ്ട് റീസെറ്റ് ചെയ്യുന്നു
-            await ctx.reply(`🚷 <b>${user.first_name}</b> reached 3 warnings and has been <b>MUTED</b> automatically.`, { parse_mode: "HTML" });
+            userWarnings[user.id] = 0;
+            await ctx.reply(`🚷 <b>${user.first_name} reached 3/3 warnings and has been muted!</b>`, { parse_mode: "HTML" });
         } catch (e) {
-            await ctx.reply(`❌ Failed to auto-mute user: ${e.message}`);
+            await ctx.reply(`❌ Error auto-muting: ${e.message}`);
         }
     } else {
-        await ctx.reply(`⚠️ <b>${user.first_name}</b> has been warned. (${userWarnings[user.id]}/3)`, { parse_mode: "HTML" });
+        await ctx.reply(`⚠️ <b>User ${user.first_name} has been warned (${userWarnings[user.id]}/3). Don't break the rules!</b>`, { parse_mode: "HTML" });
     }
 });
 
-// വാണിംഗ് കൗണ്ട് റീസെറ്റ് ചെയ്യാനുള്ള കമാൻഡ്
 bot.command('resetwarn', async (ctx) => {
     if (!await isAdmin(ctx)) return;
-    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Please reply to the user to reset warnings.");
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to a user to reset warnings.");
     
     const user = ctx.message.reply_to_message.from;
     userWarnings[user.id] = 0;
-    await ctx.reply(`✅ Warnings reset for <b>${user.first_name}</b>.`, { parse_mode: "HTML" });
+    await ctx.reply(`✅ <b>Warnings reset for ${user.first_name}. Clean slate!</b>`, { parse_mode: "HTML" });
 });
 
-// --- 9. ANTILINK TOGGLE COMMAND ---
 bot.command('antilink', async (ctx) => {
-    if (!await isAdmin(ctx)) return ctx.reply("❌ You do not have permission!");
+    if (!await isAdmin(ctx)) return ctx.reply("❌ Admins only!");
     const args = ctx.match ? ctx.match.trim().toLowerCase() : '';
     
     if (args === 'on') {
         antilinkStatus = true;
-        await ctx.reply("✅ Anti-link system enabled! Only links are allowed.");
+        await ctx.reply("✅ <b>Anti-link active. Non-link messages will be purged!</b>", { parse_mode: "HTML" });
     } else if (args === 'off') {
         antilinkStatus = false;
-        await ctx.reply("🛑 Anti-link system disabled! All messages allowed.");
+        await ctx.reply("🛑 <b>Anti-link disabled. All messages allowed.</b>", { parse_mode: "HTML" });
     } else {
-        await ctx.reply("⚠️ Usage: `/antilink on` or `/antilink off`");
+        await ctx.reply("⚠️ Use: `/antilink on` or `/antilink off`");
     }
 });
 
-// --- 10. WELCOME NEW MEMBERS ---
+// --- WELCOME & TEXT PURGE HANDLERS ---
+
 bot.on('message:new_chat_members', async (ctx) => {
     for (const newMember of ctx.message.new_chat_members) {
         if (newMember.id === ctx.me.id) continue;
@@ -207,7 +232,7 @@ bot.on('message:new_chat_members', async (ctx) => {
             if (lastWelcomeMessageId !== null) {
                 try { await ctx.api.deleteMessage(ctx.chat.id, lastWelcomeMessageId); } catch (e) {}
             }
-            const welcomeText = `👋 Hello <a href="tg://user?id=${newMember.id}">${newMember.first_name}</a>, welcome to our group!`;
+            const welcomeText = `✨ <b>Welcome</b> <a href="tg://user?id=${newMember.id}">${newMember.first_name}</a> <b>to the group! Stay respectful.</b>`;
             const sentMessage = await ctx.reply(welcomeText, { parse_mode: "HTML" });
             lastWelcomeMessageId = sentMessage.message_id;
         } catch (err) {
@@ -216,7 +241,6 @@ bot.on('message:new_chat_members', async (ctx) => {
     }
 });
 
-// --- 11. HANDLE MESSAGES (DELETE NON-LINKS IF ANTILINK IS ON) ---
 bot.on('message:text', async (ctx) => {
     if (!antilinkStatus) return;
     if (await isAdmin(ctx)) return;
@@ -226,13 +250,11 @@ bot.on('message:text', async (ctx) => {
     if (hasLink) return;
 
     try {
-        await ctx.deleteMessage(); // മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
-        
+        await ctx.deleteMessage();
         if (lastWarningMessageId !== null) {
             try { await ctx.api.deleteMessage(ctx.chat.id, lastWarningMessageId); } catch (e) {}
         }
-
-        const warningText = `⚠️ <a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a>, only links are allowed in this group!`;
+        const warningText = `⚠️ <a href="tg://user?id=${ctx.from.id}">${ctx.from.first_name}</a>, <b>only links are allowed here!</b>`;
         const sentMessage = await ctx.reply(warningText, { parse_mode: "HTML" });
         lastWarningMessageId = sentMessage.message_id;
     } catch (err) {
@@ -240,10 +262,9 @@ bot.on('message:text', async (ctx) => {
     }
 });
 
-// Error handling
 bot.catch((err) => {
-    console.error(`Error in bot execution: ${err.error.message}`);
+    console.error(`Bot Error: ${err.error.message}`);
 });
 
-console.log("Bot is starting...");
+console.log("Rose-Style Management Bot is starting...");
 bot.start();
