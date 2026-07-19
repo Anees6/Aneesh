@@ -22,9 +22,13 @@ let startHour = 22;
 let endHour = 6;    
 const TIMEZONE = "Asia/Kolkata"; // ഇന്ത്യയിലെ സമയക്രമം അനുസരിച്ച് പ്രവർത്തിക്കാൻ
 
+// പുതിയ ടൈമർ സെറ്റിംഗ്സ് (Default: 15 മിനിറ്റും 15 സെക്കൻഡും)
+let linkDeleteMinutes = 15;
+let msgDeleteSeconds = 15;
+
 const userWarnings = {};
 
-// 15 സെക്കൻഡിന് ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+// 15 സെക്കൻഡിന് ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ (Dynamic ആക്കി മാറ്റി)
 function deleteAfter15Seconds(ctx, messageId) {
     setTimeout(async () => {
         try {
@@ -32,10 +36,10 @@ function deleteAfter15Seconds(ctx, messageId) {
         } catch (e) {
             // എറർ ഒഴിവാക്കാൻ
         }
-    }, 15000);
+    }, msgDeleteSeconds * 1000); // മില്ലിസെക്കൻഡിലേക്ക് മാറ്റുന്നു
 }
 
-// 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+// 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യാനുള്ള ഫങ്ഷൻ (Dynamic ആക്കി മാറ്റി)
 function deleteLinkAfter15Minutes(ctx, messageId) {
     setTimeout(async () => {
         try {
@@ -43,7 +47,7 @@ function deleteLinkAfter15Minutes(ctx, messageId) {
         } catch (e) {
             // എറർ ഒഴിവാക്കാൻ
         }
-    }, 900000); // 15 മിനിറ്റ്
+    }, linkDeleteMinutes * 60 * 1000); // മിനിറ്റുകൾ മില്ലിസെക്കൻഡിലേക്ക് മാറ്റുന്നു
 }
 
 // സമയപരിധിക്ക് ഉള്ളിലാണോ എന്ന് നോക്കുന്ന ഫങ്ഷൻ
@@ -130,7 +134,8 @@ bot.callbackQuery("help_settings", async (ctx) => {
         "🔹 `/antilink off` - Allow all normal messages.\n" +
         "🔹 `/autodel on` - Auto delete links & mute sender for 5 hours.\n" +
         "🔹 `/autodel off` - Stop auto deleting links.\n" +
-        "🔹 `/setlinktime [start] [end]` - Set restricted hours (e.g., `/setlinktime 22 6`).";
+        "🔹 `/setlinktime [start] [end]` - Set restricted hours (e.g., `/setlinktime 22 6`).\n" +
+        "🔹 `/setdeltime [link_mins] [msg_secs]` - Set custom delete times (e.g., `/setdeltime 5 10`).";
     const backKb = new InlineKeyboard().text("⬅️ Back", "help_main");
     await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: backKb });
     await ctx.answerCallbackQuery();
@@ -387,6 +392,37 @@ bot.command('setlinktime', async (ctx) => {
     deleteAfter15Seconds(ctx, sent.message_id);
 });
 
+// --- പുതിയ കമാൻഡ്: ഡിലീറ്റ് ചെയ്യേണ്ട സമയം അഡ്മിൻമാർക്ക് സെറ്റ് ചെയ്യാൻ ---
+bot.command('setdeltime', async (ctx) => {
+    if (!await isAdmin(ctx)) {
+        const sent = await ctx.reply("❌ Admins only!");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+
+    const matches = ctx.match ? ctx.match.trim().split(/\s+/) : [];
+    if (matches.length !== 2) {
+        const sent = await ctx.reply("⚠️ <b>Usage:</b> `/setdeltime [Link Mins] [Msg Secs]`\nExample: `/setdeltime 15 15` (15 Mins for links, 15 Secs for alerts)", { parse_mode: "HTML" });
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+
+    const linkMins = parseInt(matches[0]);
+    const msgSecs = parseInt(matches[1]);
+
+    if (isNaN(linkMins) || isNaN(msgSecs) || linkMins <= 0 || msgSecs <= 0) {
+        const sent = await ctx.reply("⚠️ Time values must be numbers greater than 0.");
+        deleteAfter15Seconds(ctx, sent.message_id);
+        return;
+    }
+
+    linkDeleteMinutes = linkMins;
+    msgDeleteSeconds = msgSecs;
+
+    const sent = await ctx.reply(`✅ <b>Delete configurations updated!</b>\n▪️ Links auto-delete: <b>${linkDeleteMinutes} minutes</b>\n▪️ Normal alerts delete: <b>${msgDeleteSeconds} seconds</b>`, { parse_mode: "HTML" });
+    deleteAfter15Seconds(ctx, sent.message_id);
+});
+
 // --- WELCOME & TEXT PURGE HANDLERS ---
 
 bot.on('message:new_chat_members', async (ctx) => {
@@ -417,7 +453,7 @@ bot.on('message:text', async (ctx) => {
     // കസ്റ്റം ഫീച്ചർ: സെറ്റ് ചെയ്ത സമയത്തിന് ഉള്ളിലാണെങ്കിൽ ലിങ്ക് ഡിലീറ്റ് ചെയ്യലും 5 മണിക്കൂർ മ്യൂട്ട് ചെയ്യലും
     if (hasLink && autodelStatus && !isAdminUser) {
         if (isWithinTimeRange()) {
-            // സമയപരിധിക്ക് ഉള്ളിൽ - 15 മിനിറ്റിന് ശേഷം ലിങ്ക് ഡിലീറ്റ് ചെയ്യും
+            // സമയപരിധിക്ക് ഉള്ളിൽ - ലിങ്ക് ഡിലീറ്റ് ചെയ്യും
             deleteLinkAfter15Minutes(ctx, ctx.message.message_id);
 
             // യൂസറെ 5 മണിക്കൂറത്തേക്ക് മ്യൂട്ട് ചെയ്യുന്നു (Current Time + 5 Hours)
