@@ -1,8 +1,6 @@
 import os
-import time
 import logging
 import asyncio
-import requests
 from threading import Thread
 from flask import Flask
 from telegram import Update
@@ -14,42 +12,22 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ----------------- FLASK & KEEP-ALIVE SERVER -----------------
+# ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is Powerfully Alive 24/7!"
+    return "Bot is Running Live 24/7!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# സെർവർ ഉറങ്ങിപ്പോവാതിരിക്കാൻ തനിയെ 4 മിനിറ്റ് കൂടുമ്പോൾ Ping ചെയ്യുന്നു
-def keep_alive_ping():
-    while True:
-        time.sleep(240)  # 4 മിനിറ്റ് ഗ്യാപ്പ്
-        try:
-            render_url = os.environ.get("RENDER_EXTERNAL_URL")
-            if render_url:
-                requests.get(render_url)
-                logging.info("Self-Ping successful!")
-            else:
-                requests.get("http://127.0.0.1:8080/")
-        except Exception as e:
-            logging.error(f"Self-Ping error: {e}")
-
-def start_background_tasks():
-    # Flask Server Thread
-    t1 = Thread(target=run_flask)
-    t1.daemon = True
-    t1.start()
-    
-    # Self Ping Thread
-    t2 = Thread(target=keep_alive_ping)
-    t2.daemon = True
-    t2.start()
-# ------------------------------------------------------------------
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+# -----------------------------------------------------------
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
@@ -60,37 +38,34 @@ connected_groups = {DEFAULT_GROUP_ID}
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
 
-# ബോട്ട് ഉള്ള ഗ്രൂപ്പ് ട്രാക്ക് ചെയ്യാൻ
+# ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
 
-# ഫോട്ടോസ് അയക്കാനുള്ള ഫംഗ്ഷൻ (Retry ഓപ്ഷനോടെ)
+# ഫോട്ടോകൾ മാത്രം ഗ്രൂപ്പിലേക്ക് അയക്കുന്നു
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     caption = update.message.caption or ""
 
     sent_success = False
     for group_id in list(connected_groups):
-        for attempt in range(3):
-            try:
-                await context.bot.send_photo(
-                    chat_id=group_id,
-                    photo=photo,
-                    caption=caption
-                )
-                sent_success = True
-                break
-            except Exception as e:
-                logging.error(f"Attempt {attempt+1} failed for group {group_id}: {e}")
-                await asyncio.sleep(1)
+        try:
+            await context.bot.send_photo(
+                chat_id=group_id,
+                photo=photo,
+                caption=caption
+            )
+            sent_success = True
+        except Exception as e:
+            logging.error(f"Error sending photo to {group_id}: {e}")
 
     if sent_success:
         await update.message.reply_text("✅ ഫോട്ടോ വിജയകരമായി ഗ്രൂപ്പിലേക്ക് അയച്ചിട്ടുണ്ട്!")
     else:
         await update.message.reply_text("⚠️ ഫോട്ടോ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
 
-# ടെക്സ്റ്റോ ലിങ്കുകളോ അയച്ചാൽ 5 സെക്കൻഡിൽ ഡിലീറ്റ് ചെയ്യും
+# ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         warning_msg = await update.message.reply_text(
@@ -103,7 +78,7 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         logging.error(f"Error handling text/link: {e}")
 
 def main():
-    start_background_tasks()
+    keep_alive()
 
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -112,7 +87,7 @@ def main():
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
 
-    print("Bot is running...")
+    print("Bot is starting...")
     bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
