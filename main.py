@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import asyncio
 import requests
@@ -13,7 +14,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ----------------- FLASK & SELF-PING SERVER -----------------
+# ----------------- FLASK & KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
 
 @app.route('/')
@@ -27,26 +28,24 @@ def run_flask():
 # സെർവർ ഉറങ്ങിപ്പോവാതിരിക്കാൻ തനിയെ 4 മിനിറ്റ് കൂടുമ്പോൾ Ping ചെയ്യുന്നു
 def keep_alive_ping():
     while True:
+        time.sleep(240)  # 4 മിനിറ്റ് ഗ്യാപ്പ്
         try:
             render_url = os.environ.get("RENDER_EXTERNAL_URL")
             if render_url:
                 requests.get(render_url)
                 logging.info("Self-Ping successful!")
             else:
-                # Localhost ping as fallback
                 requests.get("http://127.0.0.1:8080/")
         except Exception as e:
             logging.error(f"Self-Ping error: {e}")
-        # 4 മിനിറ്റ് (240 സെക്കൻഡ്) ഇടവേള
-        asyncio.run(asyncio.sleep(240))
 
 def start_background_tasks():
-    # Flask Server ഓൺ ചെയ്യുന്നു
+    # Flask Server Thread
     t1 = Thread(target=run_flask)
     t1.daemon = True
     t1.start()
     
-    # Self Ping ഓൺ ചെയ്യുന്നു
+    # Self Ping Thread
     t2 = Thread(target=keep_alive_ping)
     t2.daemon = True
     t2.start()
@@ -66,14 +65,13 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
 
-# ഫോട്ടോസ് അയക്കാനുള്ള പ്രധാന ഫംഗ്ഷൻ (Retry ഓപ്ഷനോടെ)
+# ഫോട്ടോസ് അയക്കാനുള്ള ഫംഗ്ഷൻ (Retry ഓപ്ഷനോടെ)
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     caption = update.message.caption or ""
 
     sent_success = False
     for group_id in list(connected_groups):
-        # എറർ വന്നാൽ 3 തവണ വരെ വീണ്ടും അയക്കാൻ ശ്രമിക്കും
         for attempt in range(3):
             try:
                 await context.bot.send_photo(
@@ -82,10 +80,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption=caption
                 )
                 sent_success = True
-                break  # വിജയിച്ചാൽ ലൂപ്പ് നിർത്തും
+                break
             except Exception as e:
                 logging.error(f"Attempt {attempt+1} failed for group {group_id}: {e}")
-                await asyncio.sleep(1) # 1 സെക്കൻഡ് ഗ്യാപ്പ്
+                await asyncio.sleep(1)
 
     if sent_success:
         await update.message.reply_text("✅ ഫോട്ടോ വിജയകരമായി ഗ്രൂപ്പിലേക്ക് അയച്ചിട്ടുണ്ട്!")
@@ -105,22 +103,16 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         logging.error(f"Error handling text/link: {e}")
 
 def main():
-    # സെർവറും സെൽഫ് പിംഗും സ്റ്റാർട്ട് ചെയ്യുന്നു
     start_background_tasks()
 
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Handlers
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
-    
-    # ഫോട്ടോസ് ഹാൻഡ്‌ലർ
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
-    
-    # ടെക്സ്റ്റ്/ലിങ്ക് തടയൽ
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
 
-    print("Bot is powerfully running 24/7...")
+    print("Bot is running...")
     bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
