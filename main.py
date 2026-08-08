@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from threading import Thread
 from flask import Flask
 from telegram import Update
@@ -11,7 +12,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ----------------- FLASK SERVER (Bot Keep-Alive) -----------------
+# ----------------- FLASK SERVER (Keep-Alive) -----------------
 app = Flask(__name__)
 
 @app.route('/')
@@ -19,7 +20,6 @@ def home():
     return "Bot is alive and running!"
 
 def run_flask():
-    # Render നൽകുന്ന PORT ലേക്ക് അല്ലെങ്കിൽ Default PORT 8080 ലേക്ക് റൺ ചെയ്യുന്നു
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
@@ -29,34 +29,58 @@ def keep_alive():
     t.start()
 # ------------------------------------------------------------------
 
-# Bot Token & Group ID
+# Bot Credentials
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
+# /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("നമസ്കാരം! നിങ്ങൾ അയക്കുന്ന മെസ്സേജുകൾ ഗ്രൂപ്പിലേക്ക് ഫോർവേർഡ് ചെയ്യുന്നതാണ്.")
+    await update.message.reply_text("നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോസ് മാത്രം അയക്കുക. ടെക്സ്റ്റ്/ലിങ്കുകൾ അനുവദനീയമല്ല.")
 
-async def forward_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ഫോട്ടോസ് മാത്രം ഗ്രൂപ്പിലേക്ക് അയക്കുന്ന ഫംഗ്ഷൻ (പേര് ഇല്ലാതെ)
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        await context.bot.forward_message(
+        # ഫോട്ടോ മാത്രം എടുത്ത് ഗ്രൂപ്പിലേക്ക് അയക്കുന്നു (Copy message ഉപയോഗിച്ചാൽ അയച്ചയാളുടെ പേര് കാണില്ല)
+        await context.bot.copy_message(
             chat_id=GROUP_ID,
             from_chat_id=update.effective_chat.id,
             message_id=update.message.message_id
         )
+        await update.message.reply_text("✅ ഫോട്ടോ ഗ്രൂപ്പിലേക്ക് അയച്ചിട്ടുണ്ട്!")
     except Exception as e:
-        logging.error(f"Error forwarding message: {e}")
+        logging.error(f"Error handling photo: {e}")
+
+# ടെക്സ്റ്റോ ലിങ്കുകളോ അയച്ചാൽ വാർണിംഗ് കൊടുത്ത് ഡിലീറ്റ് ചെയ്യുന്ന ഫംഗ്ഷൻ
+async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        # വാർണിംഗ് മെസ്സേജ് അയക്കുന്നു
+        warning_msg = await update.message.reply_text(
+            "⚠️ ലിങ്കുകളോ ടെക്സ്റ്റുകളോ അയക്കാൻ പാടില്ല! ഫോട്ടോകൾ മാത്രം അയക്കുക."
+        )
+        
+        # 5 സെക്കൻഡിന് ശേഷം യൂസറുടെ മെസ്സേജും ബോട്ടിന്റെ മെസ്സേജും ഡിലീറ്റ് ചെയ്യും
+        await asyncio.sleep(5)
+        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)
+        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=warning_msg.message_id)
+    except Exception as e:
+        logging.error(f"Error handling text/link: {e}")
 
 def main():
-    # Flask Web Server സ്റ്റാർട്ട് ചെയ്യുന്നു
+    # Keep-alive സെർവർ സ്റ്റാർട്ട് ചെയ്യൽ
     keep_alive()
-    print("Flask Server started for Keep-Alive...")
 
-    # Telegram Bot സ്റ്റാർട്ട് ചെയ്യുന്നു
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, forward_to_group))
 
-    print("Bot starting...")
+    # Handlers
+    bot_app.add_handler(CommandHandler("start", start))
+    
+    # 1. ഫോട്ടോസ് മാത്രം പ്രൊസസ് ചെയ്യും
+    bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
+    
+    # 2. ഫോട്ടോ അല്ലാത്ത മറ്റെല്ലാ മെസ്സേജുകളും (Text, Link, Documents, Videos etc.) റിജക്ട് ചെയ്യും
+    bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
+
+    print("Bot is running...")
     bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
