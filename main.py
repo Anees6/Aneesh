@@ -26,11 +26,14 @@ def run_flask():
 # -----------------------------------------------------------
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
-TARGET_GROUP_ID = -1004376973168
 
-connected_groups = {int(os.environ.get("GROUP_ID", TARGET_GROUP_ID)), TARGET_GROUP_ID}
+# ടെക്സ്റ്റ് മാത്രം പോകേണ്ട പ്രത്യേക ഗ്രൂപ്പ് ഐഡി
+INFO_ONLY_GROUP_ID = -1004376973168
+DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
-# Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ് സൂക്ഷിക്കാൻ
+connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
+
+# Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ്
 muted_users = set()
 
 # /start Command
@@ -77,19 +80,18 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
 
-# ഫോട്ടോകൾ മാത്രം ഗ്രൂപ്പിലേക്ക് അയക്കുന്നു
+# ഫോട്ടോ ഹാൻഡ്‌ലർ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
-    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ ഫോട്ടോ അയക്കില്ല
+    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ മെസ്സേജ് അയക്കില്ല
     if user_id in muted_users:
         await update.message.reply_text("🚫 നിങ്ങൾ മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു.")
         return
 
     photo = update.message.photo[-1].file_id
-    # ക്യാപ്ഷൻ മാത്രം (പേരോ ഐഡിയോ ചേർക്കുന്നില്ല)
-    caption = update.message.caption or ""
+    user_caption = update.message.caption or ""
 
     # @Faseena5bot ലേക്ക് റീഡയറക്ട് ചെയ്യുന്ന URL ബട്ടൺ
     keyboard = [
@@ -100,20 +102,41 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent_success = False
     for group_id in list(connected_groups):
         try:
-            await context.bot.send_photo(
-                chat_id=group_id,
-                photo=photo,
-                caption=caption,
-                reply_markup=reply_markup
-            )
+            # പ്രത്യേക ഗ്രൂപ്പിൽ (-1004376973168) ഫോട്ടോ ഇല്ലാതെ വിവരങ്ങൾ (Text/Details) മാത്രം അയക്കുന്നു
+            if group_id == INFO_ONLY_GROUP_ID:
+                user_mention = f"<a href='tg://user?id={user_id}'>{user.full_name}</a>"
+                if user.username:
+                    user_mention += f" (@{user.username})"
+
+                info_text = (
+                    f"📥 <b>New Photo Submitted</b>\n\n"
+                    f"👤 <b>Name:</b> {user_mention}\n"
+                    f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
+                    f"💬 <b>Caption:</b> {user_caption if user_caption else 'No Caption'}"
+                )
+
+                await context.bot.send_message(
+                    chat_id=group_id,
+                    text=info_text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup
+                )
+            else:
+                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോ അയക്കുന്നു
+                await context.bot.send_photo(
+                    chat_id=group_id,
+                    photo=photo,
+                    caption=user_caption,
+                    reply_markup=reply_markup
+                )
             sent_success = True
         except Exception as e:
-            logging.error(f"Error sending photo to {group_id}: {e}")
+            logging.error(f"Error processing for group {group_id}: {e}")
 
     if sent_success:
-        await update.message.reply_text("✅ ഫോട്ടോ വിജയകരമായി ഗ്രൂപ്പിലേക്ക് അയച്ചിട്ടുണ്ട്!")
+        await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!")
     else:
-        await update.message.reply_text("⚠️ ഫോട്ടോ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
+        await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
 
 # ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
