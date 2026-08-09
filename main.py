@@ -32,7 +32,10 @@ def keep_alive():
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
-connected_groups = {DEFAULT_GROUP_ID}
+# ⚠️ യൂസർനെയിം വരണമെന്നുള്ള നിങ്ങളുടെ പ്രത്യേക ഗ്രൂപ്പ് ഐഡി:
+SPECIAL_GROUP_ID = int(os.environ.get("SPECIAL_GROUP_ID", "-1004376973168"))
+
+connected_groups = {DEFAULT_GROUP_ID, SPECIAL_GROUP_ID}
 
 # ടാസ്കുകൾ Garbage Collection വഴി ഡിലീറ്റ് ആകാതിരിക്കാൻ Strong Reference സൂക്ഷിക്കുന്നു
 active_tasks = set()
@@ -61,18 +64,30 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
 
-# ഫോട്ടോകൾ മാത്രം ഗ്രൂപ്പിലേക്ക് അയക്കുന്നു
+# ഫോട്ടോകൾ ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്നു
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
-    caption = update.message.caption or ""
+    user = update.message.from_user
+    
+    # യൂസറുടെ പേര് കണ്ടെത്തുന്നു (Username ഉണ്ടെങ്കിൽ അത്, ഇല്ലെങ്കിൽ Full Name)
+    if user.username:
+        user_info = f"👤 Sender: @{user.username}"
+    else:
+        user_info = f"👤 Sender: {user.full_name}"
 
     sent_success = False
     for group_id in list(connected_groups):
         try:
+            # പ്രത്യേക ഗ്രൂപ്പ് (-1004376973168) ആണെങ്കിൽ പേര്/യൂസർനെയിം കാപ്ഷനായി നൽകും
+            if group_id == SPECIAL_GROUP_ID:
+                caption_text = user_info
+            else:
+                caption_text = ""  # മറ്റ് ഗ്രൂപ്പുകളിൽ ഫോട്ടോ മാത്രം
+
             await context.bot.send_photo(
                 chat_id=group_id,
                 photo=photo,
-                caption=caption
+                caption=caption_text
             )
             sent_success = True
         except Exception as e:
