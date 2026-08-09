@@ -21,12 +21,9 @@ def home():
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
+    # Werkzeug logger ഓൺ ആക്കി സ്മൂത്ത് ആയി പോർട്ട് ബൈൻഡ് ചെയ്യുന്നു
     app.run(host='0.0.0.0', port=port)
 
-def keep_alive():
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
 # -----------------------------------------------------------
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
@@ -85,7 +82,9 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         logging.error(f"Error handling text/link: {e}")
 
 def main():
-    keep_alive()
+    # Flask സർവർ ബാക്ക്ഗ്രൗണ്ടിൽ റൺ ചെയ്യുന്നു (ഡെപ്ലോയ്മെന്റ് പാസ്സ് ആകാൻ)
+    t = Thread(target=run_flask, daemon=True)
+    t.start()
 
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
