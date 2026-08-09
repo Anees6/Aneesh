@@ -26,12 +26,9 @@ def run_flask():
 # -----------------------------------------------------------
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
-
-# നിങ്ങളുടെ ടെസ്റ്റ് ഗ്രൂപ്പ് ഐഡി
 TARGET_GROUP_ID = -1004376973168
 
-DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", str(TARGET_GROUP_ID)))
-connected_groups = {DEFAULT_GROUP_ID, TARGET_GROUP_ID}
+connected_groups = {int(os.environ.get("GROUP_ID", TARGET_GROUP_ID)), TARGET_GROUP_ID}
 
 # Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ് സൂക്ഷിക്കാൻ
 muted_users = set()
@@ -46,23 +43,23 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text(f"📌 Chat ID: <code>{chat_id}</code>\n👤 Your ID: <code>{user_id}</code>", parse_mode="HTML")
 
-# /mute command (ഉദാഹരണത്തിന്: /mute 7965472783)
+# /mute command
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /mute 7965472783)")
+        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /mute 12345678)")
         return
     
     try:
         user_to_mute = int(context.args[0])
         muted_users.add(user_to_mute)
-        await update.message.reply_text(f"🔇 User {user_to_mute} മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു! ഇനി ഇവരുടെ പോസ്റ്റുകൾ ഗ്രൂപ്പിൽ വരില്ല.")
+        await update.message.reply_text(f"🔇 User {user_to_mute} മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു!")
     except ValueError:
-        await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്. സംഖ്യകൾ മാത്രം നൽകുക.")
+        await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
 
-# /unmute command (ഉദാഹരണത്തിന്: /unmute 7965472783)
+# /unmute command
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /unmute 7965472783)")
+        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /unmute 12345678)")
         return
     
     try:
@@ -87,11 +84,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ ഫോട്ടോ അയക്കില്ല
     if user_id in muted_users:
-        await update.message.reply_text("🚫 നിങ്ങൾ മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു. നിങ്ങളുടെ ഫോട്ടോ ഗ്രൂപ്പിലേക്ക് പോസ്റ്റ് ആകില്ല.")
+        await update.message.reply_text("🚫 നിങ്ങൾ മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു.")
         return
 
     photo = update.message.photo[-1].file_id
-    user_caption = update.message.caption or ""
+    # ക്യാപ്ഷൻ മാത്രം (പേരോ ഐഡിയോ ചേർക്കുന്നില്ല)
+    caption = update.message.caption or ""
 
     # @Faseena5bot ലേക്ക് റീഡയറക്ട് ചെയ്യുന്ന URL ബട്ടൺ
     keyboard = [
@@ -102,21 +100,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent_success = False
     for group_id in list(connected_groups):
         try:
-            # നിർദ്ദിഷ്ട ഗ്രൂപ്പിൽ (TARGET_GROUP_ID) മാത്രം പേരും യൂസർനേമും കാണിക്കും
-            if group_id == TARGET_GROUP_ID:
-                user_mention = f"<a href='tg://user?id={user_id}'>{user.full_name}</a>"
-                if user.username:
-                    user_mention += f" (@{user.username})"
-                
-                final_caption = f"{user_caption}\n\n👤 <b>Posted by:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user_id}</code>"
-            else:
-                final_caption = user_caption
-
             await context.bot.send_photo(
                 chat_id=group_id,
                 photo=photo,
-                caption=final_caption,
-                parse_mode="HTML" if group_id == TARGET_GROUP_ID else None,
+                caption=caption,
                 reply_markup=reply_markup
             )
             sent_success = True
