@@ -47,11 +47,14 @@ user_registry = {}
 # ബ്ലോക്ക് ചെയ്ത യൂസർമാരുടെ User ID ലിസ്റ്റ്
 blocked_users = set()
 
+# ഓട്ടോ ഡിലീറ്റ് സമയം (സെക്കൻഡുകളിൽ) - ഡിഫോൾട്ട് 15 മിനിറ്റ് (900 സെക്കൻഡ്)
+auto_delete_delay_seconds = 900
+
 # ടാസ്കുകൾ Garbage Collection വഴി ഡിലീറ്റ് ആകാതിരിക്കാൻ Strong Reference സൂക്ഷിക്കുന്നു
 active_tasks = set()
 
-# 15 മിനിറ്റിനു ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഹെൽപ്പർ ഫങ്ഷൻ
-async def delete_msg_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay_seconds: int = 900):
+# മിനിറ്റുകൾ സെറ്റ് ചെയ്ത ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഹെൽപ്പർ ഫങ്ഷൻ
+async def delete_msg_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay_seconds: int):
     await asyncio.sleep(delay_seconds)
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
@@ -59,7 +62,9 @@ async def delete_msg_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         logging.error(f"Error auto-deleting message {message_id} in chat {chat_id}: {e}")
 
 # ടാസ്ക് സുരക്ഷിതമായി റൺ ചെയ്യുന്ന ഫങ്ഷൻ
-def schedule_message_deletion(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = 900):
+def schedule_message_deletion(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = None):
+    if delay is None:
+        delay = auto_delete_delay_seconds
     task = asyncio.create_task(delete_msg_after_delay(context, chat_id, message_id, delay))
     active_tasks.add(task)
     task.add_done_callback(active_tasks.discard)
@@ -68,6 +73,29 @@ def schedule_message_deletion(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
     schedule_message_deletion(context, update.effective_chat.id, msg.message_id)
+
+# ⏱️ ഓട്ടോ ഡിലീറ്റ് സമയം സെറ്റ് ചെയ്യാനുള്ള കമാൻഡ് (/setdelete 1, /setdelete 2, /setdelete 5 etc)
+async def set_delete_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global auto_delete_delay_seconds
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⚠️ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിന് മാത്രമേ അധികാരമുള്ളൂ!")
+        return
+
+    if not context.args:
+        current_mins = auto_delete_delay_seconds // 60
+        await update.message.reply_text(f"ℹ️ നിലവിലെ Auto-Delete സമയം: **{current_mins} മിനിറ്റ്**.\n\nമാറ്റാൻ: `/setdelete <minutes>` എന്ന് അടിക്കുക.\nഉദാഹരണത്തിന്: `/setdelete 1` അല്ലെങ്കിൽ `/setdelete 5`", parse_mode="Markdown")
+        return
+
+    try:
+        minutes = int(context.args[0])
+        if minutes <= 0:
+            await update.message.reply_text("⚠️ 1 മിനിറ്റിൽ കൂടുതൽ ഉള്ള സമയം നൽകുക.")
+            return
+        
+        auto_delete_delay_seconds = minutes * 60
+        await update.message.reply_text(f"✅ Auto-Delete സമയം വിജയകരമായി **{minutes} മിനിറ്റ്** ആയി മാറ്റിയിട്ടുണ്ട്!", parse_mode="Markdown")
+    except ValueError:
+        await update.message.reply_text("⚠️ ദയവായി സാധുവായ നമ്പർ മാത്രം നൽകുക. (ഉദാഹരണത്തിന്: `/setdelete 3`)", parse_mode="Markdown")
 
 # ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,8 +223,9 @@ def main():
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("setdelete", set_delete_time))
     bot_app.add_handler(CommandHandler("block", block_user))
-    bot_app.add_handler(CommandHandler("ban", block_user))  # /ban അടടിച്ചാലും block ചെയ്യും
+    bot_app.add_handler(CommandHandler("ban", block_user))
     bot_app.add_handler(CommandHandler("unblock", unblock_user))
     bot_app.add_handler(CommandHandler("unban", unblock_user))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
