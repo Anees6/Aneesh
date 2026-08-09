@@ -53,6 +53,16 @@ auto_delete_delay_seconds = 900
 # ടാസ്കുകൾ Garbage Collection വഴി ഡിലീറ്റ് ആകാതിരിക്കാൻ Strong Reference സൂക്ഷിക്കുന്നു
 active_tasks = set()
 
+# അഡ്മിൻ അല്ലെങ്കിൽ Anonymous Admin ആണോ എന്ന് പരിശോധിക്കുന്ന ഹെൽപ്പർ ഫങ്ഷൻ
+def is_admin_or_anonymous(update: Update) -> bool:
+    user = update.effective_user
+    # Telegram-ൽ Anonymous ആയി പോസ്റ്റ് ചെയ്യുമ്പോൾ User ID = 1087968824 (GroupAnonymousBot) ആയിരിക്കും
+    if user and (user.id == ADMIN_ID or user.id == 1087968824):
+        return True
+    if update.message and update.message.sender_chat:
+        return True
+    return False
+
 # മിനിറ്റുകൾ സെറ്റ് ചെയ്ത ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഹെൽപ്പർ ഫങ്ഷൻ
 async def delete_msg_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay_seconds: int):
     await asyncio.sleep(delay_seconds)
@@ -77,7 +87,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ⏱️ ഓട്ടോ ഡിലീറ്റ് സമയം സെറ്റ് ചെയ്യാനുള്ള കമാൻഡ് (/setdelete 1, /setdelete 2, /setdelete 5 etc)
 async def set_delete_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global auto_delete_delay_seconds
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin_or_anonymous(update):
         await update.message.reply_text("⚠️ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിന് മാത്രമേ അധികാരമുള്ളൂ!")
         return
 
@@ -107,7 +117,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
 
     # യൂസർ ബ്ലോക്ക് ചെയ്ത ആളാണോ എന്ന് പരിശോധിക്കുന്നു
-    if user.id in blocked_users:
+    if user and user.id in blocked_users:
         msg = await update.message.reply_text("🚫 ക്ഷമിക്കണം! നിങ്ങളെ ബാൻ ചെയ്തിരിക്കുകയാണ്. നിങ്ങളുടെ ഫോട്ടോകൾ ഗ്രൂപ്പിലേക്ക് അയക്കില്ല.")
         schedule_message_deletion(context, update.effective_chat.id, msg.message_id)
         return
@@ -115,11 +125,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     
     # യൂസറുടെ ഐഡിയും യൂസർനെയിമും സൂക്ഷിക്കുന്നു
-    if user.username:
-        user_registry[user.username.lower()] = user.id
-        user_mention = f"@{user.username}"
+    if user:
+        if user.username:
+            user_registry[user.username.lower()] = user.id
+            user_mention = f"@{user.username}"
+        else:
+            user_mention = f'<a href="tg://user?id={user.id}">@{user.full_name}</a>'
+        user_id_str = str(user.id)
     else:
-        user_mention = f'<a href="tg://user?id={user.id}">@{user.full_name}</a>'
+        user_mention = "Anonymous Admin"
+        user_id_str = "Anonymous"
 
     # Indian Standard Time (IST = UTC + 5:30)
     ist = timezone(timedelta(hours=5, minutes=30))
@@ -130,7 +145,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # പ്രത്യേക ഗ്രൂപ്പിലേക്കുള്ള ടെക്സ്റ്റ് മെസ്സേജ്
     text_info = (
         f"👤 Name: {user_mention}\n"
-        f"🆔 ID: <code>{user.id}</code>\n"
+        f"🆔 ID: <code>{user_id_str}</code>\n"
         f"📅 Date: {date_str}\n"
         f"⏰ Time: {time_str}"
     )
@@ -164,7 +179,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🚫 അഡ്മിന് മാത്രം ഒരാളെ ബ്ലോക്ക് ചെയ്യാനുള്ള കമാൻഡ് (/block @username അല്ലെങ്കിൽ /block 12345678)
 async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin_or_anonymous(update):
         await update.message.reply_text("⚠️ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിന് മാത്രമേ അധികാരമുള്ളൂ!")
         return
 
@@ -184,7 +199,7 @@ async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🟢 ബ്ലോക്ക് മാറ്റാനുള്ള കമാൻഡ് (/unblock @username അല്ലെങ്കിൽ /unblock 12345678)
 async def unblock_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin_or_anonymous(update):
         await update.message.reply_text("⚠️ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിന് മാത്രമേ അധികാരമുള്ളൂ!")
         return
 
