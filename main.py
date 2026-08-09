@@ -34,9 +34,18 @@ DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
 connected_groups = {DEFAULT_GROUP_ID}
 
+# 15 മിനിറ്റിനു ശേഷം മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാനുള്ള ഹെൽപ്പർ ഫങ്ഷൻ
+async def delete_msg_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay_seconds: int = 900):
+    await asyncio.sleep(delay_seconds)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        logging.error(f"Error auto-deleting message {message_id} in chat {chat_id}: {e}")
+
 # /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
+    msg = await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
+    asyncio.create_task(delete_msg_after_delay(context, update.effective_chat.id, msg.message_id))
 
 # ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61,9 +70,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f"Error sending photo to {group_id}: {e}")
 
     if sent_success:
-        await update.message.reply_text("✅ ഫോട്ടോ വിജയകരമായി ഗ്രൂപ്പിലേക്ക് അയച്ചിട്ടുണ്ട്!")
+        msg = await update.message.reply_text("✅ ഫോട്ടോ വിജയകരമായി ഗ്രൂപ്പിലേക്ക് അയച്ചിട്ടുണ്ട്!")
+        asyncio.create_task(delete_msg_after_delay(context, update.effective_chat.id, msg.message_id))
     else:
-        await update.message.reply_text("⚠️ ഫോട്ടോ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
+        msg = await update.message.reply_text("⚠️ ഫോട്ടോ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
+        asyncio.create_task(delete_msg_after_delay(context, update.effective_chat.id, msg.message_id))
 
 # ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
