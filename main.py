@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from threading import Thread
 from flask import Flask
 from telegram import Update
@@ -70,20 +70,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     user = update.message.from_user
     
-    # യൂസറുടെ പേര് കണ്ടെത്തുന്നു (Username ഉണ്ടെങ്കിൽ അത്, ഇല്ലെങ്കിൽ Full Name)
+    # Username ഉണ്ടെങ്കിൽ @username ആയി വരും, ഇല്ലെങ്കിൽ ആളുടെ പേര് @mention രീതിയിൽ ക്ലിക്ക് ചെയ്യാവുന്ന ലിങ്ക് ആയി നൽകും
     if user.username:
-        user_name = f"@{user.username}"
+        user_mention = f"@{user.username}"
     else:
-        user_name = user.full_name
+        user_mention = f'<a href="tg://user?id={user.id}">@{user.full_name}</a>'
 
-    # നിലവിലെ തീയതിയും സമയവും (DD-MM-YYYY hh:mm AM/PM) കണക്കാക്കുന്നു
-    now = datetime.now()
+    # Indian Standard Time (IST = UTC + 5:30) സെറ്റ് ചെയ്യുന്നു
+    ist = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(ist)
     date_str = now.strftime("%d-%m-%Y")
     time_str = now.strftime("%I:%M %p")
 
     # പ്രത്യേക ഗ്രൂപ്പിലേക്കുള്ള ടെക്സ്റ്റ് മെസ്സേജ്
     text_info = (
-        f"👤 Name: {user_name}\n"
+        f"👤 Name: {user_mention}\n"
         f"📅 Date: {date_str}\n"
         f"⏰ Time: {time_str}"
     )
@@ -95,10 +96,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if group_id == SPECIAL_GROUP_ID:
                 await context.bot.send_message(
                     chat_id=group_id,
-                    text=text_info
+                    text=text_info,
+                    parse_mode="HTML"
                 )
             else:
-                # മറ്റ് ഗ്രൂപ്പുകളിൽ ഫോട്ടോ മാത്രം (Caption ഇല്ലാതെ) അയക്കുന്നു
+                # മറ്റ് ഗ്രൂപ്പുകളിൽ ഫോട്ടോ മാത്രം അയക്കുന്നു
                 await context.bot.send_photo(
                     chat_id=group_id,
                     photo=photo
