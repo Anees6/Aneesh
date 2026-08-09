@@ -36,7 +36,16 @@ DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 # ⚠️ ടെക്സ്റ്റ് മെസ്സേജ് മാത്രം വരണമെന്നുള്ള പ്രത്യേക ഗ്രൂപ്പ് ഐഡി:
 SPECIAL_GROUP_ID = int(os.environ.get("SPECIAL_GROUP_ID", "-1004376973168"))
 
+# 👑 അഡ്മിൻ്റെ Telegram User ID (കമാൻഡ് ഉപയോഗിക്കാൻ)
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "7965472783"))
+
 connected_groups = {DEFAULT_GROUP_ID, SPECIAL_GROUP_ID}
+
+# Username ഉം User ID യും മാപ്പ് ചെയ്തു വെക്കാൻ ഒരു നിഘണ്ടു (Dictionary)
+user_registry = {}
+
+# ബ്ലോക്ക് ചെയ്ത യൂസർമാരുടെ User ID ലിസ്റ്റ്
+blocked_users = set()
 
 # ടാസ്കുകൾ Garbage Collection വഴി ഡിലീറ്റ് ആകാതിരിക്കാൻ Strong Reference സൂക്ഷിക്കുന്നു
 active_tasks = set()
@@ -67,16 +76,24 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ഫോട്ടോകൾ പ്രോസസ്സ് ചെയ്യുന്നു
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo = update.message.photo[-1].file_id
     user = update.message.from_user
+
+    # യൂസർ ബ്ലോക്ക് ചെയ്ത ആളാണോ എന്ന് പരിശോധിക്കുന്നു
+    if user.id in blocked_users:
+        msg = await update.message.reply_text("🚫 ക്ഷമിക്കണം! നിങ്ങളെ ബാൻ ചെയ്തിരിക്കുകയാണ്. നിങ്ങളുടെ ഫോട്ടോകൾ ഗ്രൂപ്പിലേക്ക് അയക്കില്ല.")
+        schedule_message_deletion(context, update.effective_chat.id, msg.message_id)
+        return
+
+    photo = update.message.photo[-1].file_id
     
-    # Username ഉണ്ടെങ്കിൽ @username ആയി വരും, ഇല്ലെങ്കിൽ ആളുടെ പേര് @mention രീതിയിൽ ക്ലിക്ക് ചെയ്യാവുന്ന ലിങ്ക് ആയി നൽകും
+    # യൂസറുടെ ഐഡിയും യൂസർനെയിമും സൂക്ഷിക്കുന്നു
     if user.username:
+        user_registry[user.username.lower()] = user.id
         user_mention = f"@{user.username}"
     else:
         user_mention = f'<a href="tg://user?id={user.id}">@{user.full_name}</a>'
 
-    # Indian Standard Time (IST = UTC + 5:30) സെറ്റ് ചെയ്യുന്നു
+    # Indian Standard Time (IST = UTC + 5:30)
     ist = timezone(timedelta(hours=5, minutes=30))
     now = datetime.now(ist)
     date_str = now.strftime("%d-%m-%Y")
@@ -85,6 +102,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # പ്രത്യേക ഗ്രൂപ്പിലേക്കുള്ള ടെക്സ്റ്റ് മെസ്സേജ്
     text_info = (
         f"👤 Name: {user_mention}\n"
+        f"🆔 ID: <code>{user.id}</code>\n"
         f"📅 Date: {date_str}\n"
         f"⏰ Time: {time_str}"
     )
@@ -116,6 +134,49 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
         schedule_message_deletion(context, update.effective_chat.id, msg.message_id)
 
+# 🚫 അഡ്മിന് മാത്രം ഒരാളെ ബ്ലോക്ക് ചെയ്യാനുള്ള കമാൻഡ് (/block @username അല്ലെങ്കിൽ /block 12345678)
+async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⚠️ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിന് മാത്രമേ അധികാരമുള്ളൂ!")
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ ദയവായി Username അല്ലെങ്കിൽ User ID നൽകുക.\nഉദാഹരണത്തിന്: `/block @username` അല്ലെങ്കിൽ `/block 123456789`", parse_mode="Markdown")
+        return
+
+    target = context.args[0].replace("@", "").lower()
+    user_id = user_registry.get(target) if not target.isdigit() else int(target)
+
+    if not user_id:
+        await update.message.reply_text("❌ യൂസറെ കണ്ടെത്താൻ കഴിഞ്ഞില്ല. ആ യൂസർ ബോട്ടിന് മുൻപ് മെസ്സേജ് അയച്ചിട്ടുണ്ടെന്ന് ഉറപ്പാക്കുക.")
+        return
+
+    blocked_users.add(user_id)
+    await update.message.reply_text(f"🚫 User (`{user_id}`) വിജയകരമായി BLOCK ചെയ്തു! ഇനി ഇയാൾ ബോട്ടിന് ഫോട്ടോ അയച്ചാൽ ഗ്രൂപ്പിലേക്ക് പോകില്ല.", parse_mode="Markdown")
+
+# 🟢 ബ്ലോക്ക് മാറ്റാനുള്ള കമാൻഡ് (/unblock @username അല്ലെങ്കിൽ /unblock 12345678)
+async def unblock_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⚠️ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിന് മാത്രമേ അധികാരമുള്ളൂ!")
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ ദയവായി Username അല്ലെങ്കിൽ User ID നൽകുക.\nഉദാഹരണത്തിന്: `/unblock @username` അല്ലെങ്കിൽ `/unblock 123456789`", parse_mode="Markdown")
+        return
+
+    target = context.args[0].replace("@", "").lower()
+    user_id = user_registry.get(target) if not target.isdigit() else int(target)
+
+    if not user_id:
+        await update.message.reply_text("❌ യൂസറെ കണ്ടെത്താൻ കഴിഞ്ഞില്ല.")
+        return
+
+    if user_id in blocked_users:
+        blocked_users.remove(user_id)
+        await update.message.reply_text(f"✅ User (`{user_id}`) UNBLOCK ചെയ്തു! ഇനി ഇയാൾക്ക് ഫോട്ടോ അയക്കാം.", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("⚠️ ഈ യൂസർ ബ്ലോക്ക് ലിസ്റ്റിൽ ഇല്ല.")
+
 # ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -134,6 +195,10 @@ def main():
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("block", block_user))
+    bot_app.add_handler(CommandHandler("ban", block_user))  # /ban അടടിച്ചാലും block ചെയ്യും
+    bot_app.add_handler(CommandHandler("unblock", unblock_user))
+    bot_app.add_handler(CommandHandler("unban", unblock_user))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
