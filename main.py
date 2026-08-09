@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 from threading import Thread
+import urllib.request
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
@@ -17,12 +18,33 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is Running Live 24/7!"
+    return "Bot is Live 24/7!"
+
+@app.route('/health')
+def health():
+    return "OK", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
 
+# Render Sleep ആകാതിരിക്കാൻ 5 മിനിറ്റ് കൂടുമ്പോൾ സ്വന്തം സർവറിലേക്ക് റിക്വസ്റ്റ് അയക്കുന്ന ഫങ്ഷൻ
+async def self_ping():
+    await asyncio.sleep(10)
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not render_url:
+        logging.info("RENDER_EXTERNAL_URL കണ്ടുപിടിച്ചില്ല, self-ping സ്കിപ്പ് ചെയ്യുന്നു.")
+        return
+
+    while True:
+        try:
+            url = f"{render_url}/health"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            urllib.request.urlopen(req)
+            logging.info("Self ping successful to keep server awake.")
+        except Exception as e:
+            logging.error(f"Self ping failed: {e}")
+        await asyncio.sleep(300) # 5 മിനിറ്റിൽ ഒരിക്കൽ പിങ് ചെയ്യും
 # -----------------------------------------------------------
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
@@ -150,11 +172,16 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logging.error(f"Error handling text/link: {e}")
 
+# പോസ്റ്റ് ആക്ഷൻ എക്സിക്യൂഷൻ (Self-Ping സ്റ്റാർട്ട് ചെയ്യുന്നു)
+async def post_init(application):
+    asyncio.create_task(self_ping())
+
 def main():
+    # Flask web server ബാക്ക്ഗ്രൗണ്ടിൽ റൺ ചെയ്യുന്നു
     t = Thread(target=run_flask, daemon=True)
     t.start()
 
-    bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
+    bot_app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CommandHandler("id", get_id))
