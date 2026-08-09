@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+from datetime import datetime
 from threading import Thread
 from flask import Flask
 from telegram import Update
@@ -32,7 +33,7 @@ def keep_alive():
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
-# ⚠️ യൂസർനെയിം വരണമെന്നുള്ള നിങ്ങളുടെ പ്രത്യേക ഗ്രൂപ്പ് ഐഡി:
+# ⚠️ ടെക്സ്റ്റ് മെസ്സേജ് മാത്രം വരണമെന്നുള്ള പ്രത്യേക ഗ്രൂപ്പ് ഐഡി:
 SPECIAL_GROUP_ID = int(os.environ.get("SPECIAL_GROUP_ID", "-1004376973168"))
 
 connected_groups = {DEFAULT_GROUP_ID, SPECIAL_GROUP_ID}
@@ -64,40 +65,53 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
 
-# ഫോട്ടോകൾ ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്നു
+# ഫോട്ടോകൾ പ്രോസസ്സ് ചെയ്യുന്നു
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     user = update.message.from_user
     
     # യൂസറുടെ പേര് കണ്ടെത്തുന്നു (Username ഉണ്ടെങ്കിൽ അത്, ഇല്ലെങ്കിൽ Full Name)
     if user.username:
-        user_info = f"👤 Sender: @{user.username}"
+        user_name = f"@{user.username}"
     else:
-        user_info = f"👤 Sender: {user.full_name}"
+        user_name = user.full_name
+
+    # നിലവിലെ തീയതിയും സമയവും (DD-MM-YYYY hh:mm AM/PM) കണക്കാക്കുന്നു
+    now = datetime.now()
+    date_str = now.strftime("%d-%m-%Y")
+    time_str = now.strftime("%I:%M %p")
+
+    # പ്രത്യേക ഗ്രൂപ്പിലേക്കുള്ള ടെക്സ്റ്റ് മെസ്സേജ്
+    text_info = (
+        f"👤 Name: {user_name}\n"
+        f"📅 Date: {date_str}\n"
+        f"⏰ Time: {time_str}"
+    )
 
     sent_success = False
     for group_id in list(connected_groups):
         try:
-            # പ്രത്യേക ഗ്രൂപ്പ് (-1004376973168) ആണെങ്കിൽ പേര്/യൂസർനെയിം കാപ്ഷനായി നൽകും
+            # പ്രത്യേക ഗ്രൂപ്പിൽ (-1004376973168) ഫോട്ടോ ഇല്ലാതെ Text മാത്രം അയക്കുന്നു
             if group_id == SPECIAL_GROUP_ID:
-                caption_text = user_info
+                await context.bot.send_message(
+                    chat_id=group_id,
+                    text=text_info
+                )
             else:
-                caption_text = ""  # മറ്റ് ഗ്രൂപ്പുകളിൽ ഫോട്ടോ മാത്രം
-
-            await context.bot.send_photo(
-                chat_id=group_id,
-                photo=photo,
-                caption=caption_text
-            )
+                # മറ്റ് ഗ്രൂപ്പുകളിൽ ഫോട്ടോ മാത്രം (Caption ഇല്ലാതെ) അയക്കുന്നു
+                await context.bot.send_photo(
+                    chat_id=group_id,
+                    photo=photo
+                )
             sent_success = True
         except Exception as e:
-            logging.error(f"Error sending photo to {group_id}: {e}")
+            logging.error(f"Error sending to group {group_id}: {e}")
 
     if sent_success:
-        msg = await update.message.reply_text("✅ ഫോട്ടോ വിജയകരമായി ഗ്രൂപ്പിലേക്ക് അയച്ചിട്ടുണ്ട്!")
+        msg = await update.message.reply_text("✅ ഫോട്ടോ വിജയകരമായി പ്രോസസ്സ് ചെയ്ത് അയച്ചിട്ടുണ്ട്!")
         schedule_message_deletion(context, update.effective_chat.id, msg.message_id)
     else:
-        msg = await update.message.reply_text("⚠️ ഫോട്ടോ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
+        msg = await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
         schedule_message_deletion(context, update.effective_chat.id, msg.message_id)
 
 # ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
