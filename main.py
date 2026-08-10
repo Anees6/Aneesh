@@ -28,23 +28,26 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
 
-# Render Sleep ആകാതിരിക്കാൻ 5 മിനിറ്റ് കൂടുമ്പോൾ സ്വന്തം സർവറിലേക്ക് റിക്വസ്റ്റ് അയക്കുന്ന ഫങ്ഷൻ
+# Render Sleep ആകാതിരിക്കാൻ 3 മിനിറ്റ് കൂടുമ്പോൾ സ്വന്തം സർവറിലേക്ക് റിക്വസ്റ്റ് അയക്കുന്ന ഫങ്ഷൻ
 async def self_ping():
     await asyncio.sleep(10)
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    
     if not render_url:
-        logging.info("RENDER_EXTERNAL_URL കണ്ടുപിടിച്ചില്ല, self-ping സ്കിപ്പ് ചെയ്യുന്നു.")
+        logging.warning("⚠️ RENDER_EXTERNAL_URL കണ്ടുപിടിച്ചില്ല! Render Environment Variables-ൽ ഇത് നൽകിയിട്ടുണ്ടെന്ന് ഉറപ്പുവരുത്തുക.")
         return
 
     while True:
         try:
-            url = f"{render_url}/health"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            urllib.request.urlopen(req)
-            logging.info("Self ping successful to keep server awake.")
+            url = f"{render_url.rstrip('/')}/health"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            # Non-blocking രീതിയിൽ ping അയക്കുന്നു
+            await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
+            logging.info("✅ Self ping successful! Server is awake.")
         except Exception as e:
-            logging.error(f"Self ping failed: {e}")
-        await asyncio.sleep(300) # 5 മിനിറ്റിൽ ഒരിക്കൽ പിങ് ചെയ്യും
+            logging.error(f"❌ Self ping failed: {e}")
+        
+        await asyncio.sleep(180) # 3 മിനിറ്റിൽ ഒരിക്കൽ പിങ് ചെയ്യും (Sleep ആകാതിരിക്കാൻ)
 # -----------------------------------------------------------
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
