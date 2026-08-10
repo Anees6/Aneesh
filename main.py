@@ -3,6 +3,7 @@ import logging
 import asyncio
 from threading import Thread
 import urllib.request
+import re
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
@@ -83,34 +84,66 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text(f"📌 Chat ID: <code>{chat_id}</code>\n👤 Your ID: <code>{user_id}</code>", parse_mode="HTML")
 
-# /mute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
+# /mute command (ഐഡി വഴി അല്ലെങ്കിൽ മെസ്സേജിന് reply ആയി mute ചെയ്യാം)
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /mute 12345678)")
-        return
-    
-    try:
-        user_to_mute = int(context.args[0])
+    user_to_mute = None
+
+    # 1. Reply ചെയ്ത മെസ്സേജിൽ നിന്ന് User ID എടുക്കുന്നു
+    if update.message.reply_to_message:
+        reply_msg = update.message.reply_to_message
+        
+        # റിപ്ലൈ ടെക്സ്റ്റിൽ നിന്ന് User ID കണ്ടുപിടിക്കുന്നു
+        if reply_msg.text:
+            match = re.search(r"User ID:\s*(\d+)", reply_msg.text)
+            if match:
+                user_to_mute = int(match.group(1))
+        
+        # ഫോർവേഡ് ചെയ്ത മെസ്സേജ് ആണെങ്കിൽ അതിൽ നിന്നും യൂസർ ഐഡി എടുക്കാം
+        if not user_to_mute and reply_msg.forward_from:
+            user_to_mute = reply_msg.forward_from.id
+
+    # 2. Command-ന്റെ കൂടെ ഐഡി നൽകിയിട്ടുണ്ടെങ്കിൽ
+    if not user_to_mute and context.args:
+        try:
+            user_to_mute = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
+            return
+
+    if user_to_mute:
         muted_users.add(user_to_mute)
         await update.message.reply_text(f"🔇 User <code>{user_to_mute}</code> വിജയകരമായി മ്യൂട്ട് ചെയ്തു (തടഞ്ഞു)!", parse_mode="HTML")
-    except ValueError:
-        await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
+    else:
+        await update.message.reply_text("⚠️ ദയവായി യൂസറുടെ മെസ്സേജിന് Reply നൽകിയോ അല്ലെങ്കിൽ /mute <User_ID> എന്ന രീതിയിലോ ഉപയോഗിക്കുക.")
 
-# /unmute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
+# /unmute command
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /unmute 12345678)")
-        return
-    
-    try:
-        user_to_unmute = int(context.args[0])
+    user_to_unmute = None
+
+    if update.message.reply_to_message:
+        reply_msg = update.message.reply_to_message
+        if reply_msg.text:
+            match = re.search(r"User ID:\s*(\d+)", reply_msg.text)
+            if match:
+                user_to_unmute = int(match.group(1))
+        if not user_to_unmute and reply_msg.forward_from:
+            user_to_unmute = reply_msg.forward_from.id
+
+    if not user_to_unmute and context.args:
+        try:
+            user_to_unmute = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
+            return
+
+    if user_to_unmute:
         if user_to_unmute in muted_users:
             muted_users.remove(user_to_unmute)
             await update.message.reply_text(f"🔊 User <code>{user_to_unmute}</code> അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
         else:
             await update.message.reply_text("ℹ️ ഈ യൂസർ മ്യൂട്ട് ലിസ്റ്റിൽ ഇല്ല.")
-    except ValueError:
-        await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
+    else:
+        await update.message.reply_text("⚠️ ദയവായി യൂസറുടെ മെസ്സേജിന് Reply നൽകിയോ അല്ലെങ്കിൽ /unmute <User_ID> എന്ന രീതിയിലോ ഉപയോഗിക്കുക.")
 
 # ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -122,9 +155,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
-    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ പി.എമ്മിൽ വിവരമറിയിക്കും, ഗ്രൂപ്പിലേക്ക് അയക്കില്ല
+    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ പി.എമ്മിൽ വിവരമറിയിക്കും, ഫോട്ടോ അയക്കാൻ അനുവദിക്കില്ല
     if user_id in muted_users:
-        await update.message.reply_text("🚫 നിങ്ങളെ തടഞ്ഞിരിക്കുന്നു! നിങ്ങൾ ഫോട്ടോ ഇട്ടാൽ ഗ്രൂപ്പിലേക്ക് പോകില്ല.")
+        await update.message.reply_text("🚫 നിങ്ങളെ തടഞ്ഞിരിക്കുന്നു! (Muted). നിങ്ങൾക്ക് ഫോട്ടോകളോ മെസ്സേജുകളോ അയക്കാൻ സാധിക്കില്ല.")
         return
 
     photo = update.message.photo[-1].file_id
@@ -202,6 +235,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ ടെക്സ്റ്റ് മെസ്സേജുകൾ അയക്കുമ്പോഴും അറിയിപ്പ് നൽകും
+    if user_id in muted_users:
+        await update.message.reply_text("🚫 നിങ്ങളെ തടഞ്ഞിരിക്കുന്നു! (Muted). നിങ്ങൾക്ക് ഫോട്ടോകളോ മെസ്സേജുകളോ അയക്കാൻ സാധിക്കില്ല.")
+        return
+
     try:
         warning_msg = await update.message.reply_text(
             "⚠️ ലിങ്കുകളോ ടെക്സ്റ്റുകളോ അയക്കാൻ പാടില്ല! ഫോട്ടോകൾ മാത്രം അയക്കുക."
