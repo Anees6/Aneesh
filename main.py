@@ -58,6 +58,9 @@ connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
 # Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ്
 muted_users = set()
 
+# യൂസർമാരുടെ ഏറ്റവും അവസാനത്തെ താങ്ക്സ് മെസ്സേജ് ഐഡി സൂക്ഷിക്കാൻ
+user_last_thanks_msg = {}
+
 # /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
@@ -115,11 +118,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     user_caption = update.message.caption or ""
 
-    # @Faseena5bot ലേക്ക് റീഡയറക്ട് ചെയ്യുന്ന URL ബട്ടൺ
-    keyboard = [
-        [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")]
+    # ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്ന ഇൻലൈൻ ബട്ടണുകൾ
+    group_keyboard = [
+        [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")],
+        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    group_reply_markup = InlineKeyboardMarkup(group_keyboard)
 
     sent_success = False
     for group_id in list(connected_groups):
@@ -141,22 +145,43 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=group_id,
                     text=info_text,
                     parse_mode="HTML",
-                    reply_markup=reply_markup
+                    reply_markup=group_reply_markup
                 )
             else:
-                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോ അയക്കുന്നു
+                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും ബട്ടണുകളും മാത്രം അയക്കുന്നു
                 await context.bot.send_photo(
                     chat_id=group_id,
                     photo=photo,
                     caption=user_caption,
-                    reply_markup=reply_markup
+                    reply_markup=group_reply_markup
                 )
             sent_success = True
         except Exception as e:
             logging.error(f"Error processing for group {group_id}: {e}")
 
+    # യൂസറുടെ മുൻപത്തെ താങ്ക്സ് മെസ്സേജ് ഉണ്ടെങ്കിൽ അത് ഡിലീറ്റ് ചെയ്യും
+    if user_id in user_last_thanks_msg:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=user_last_thanks_msg[user_id]
+            )
+        except Exception as e:
+            logging.error(f"Error deleting old thanks message: {e}")
+
+    # യൂസറുടെ പി.എമ്മിലേക്ക് (PM) അയക്കുന്ന താങ്ക്സ് ബട്ടൺ
+    pm_keyboard = [
+        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+    ]
+    pm_reply_markup = InlineKeyboardMarkup(pm_keyboard)
+
     if sent_success:
-        await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!")
+        thanks_msg = await update.message.reply_text(
+            "✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!\nനന്ദി! ഇനിയും ഫോട്ടോകൾ അയക്കുക.",
+            reply_markup=pm_reply_markup
+        )
+        # പുതിയ മെസ്സേജ് ഐഡി സേവ് ചെയ്യുന്നു
+        user_last_thanks_msg[user_id] = thanks_msg.message_id
     else:
         await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
 
