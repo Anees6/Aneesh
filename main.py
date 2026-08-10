@@ -47,8 +47,17 @@ async def self_ping():
         except Exception as e:
             logging.error(f"❌ Self ping failed: {e}")
         
-        await asyncio.sleep(180) # 3 മിനിറ്റിൽ ഒരിക്കൽ പിങ് ചെയ്യും (Sleep ആകാതിരിക്കാൻ)
+        await asyncio.sleep(180) # 3 മിനിറ്റിൽ ഒരിക്കൽ പിങ് ചെയ്യും
 # -----------------------------------------------------------
+
+# 5 മിനിറ്റിന് ശേഷം ഗ്രൂപ്പിൽ അയച്ച ഫോട്ടോ ഡിലീറ്റ് ചെയ്യുന്ന ഫങ്ഷൻ
+async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = 300):
+    await asyncio.sleep(delay)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logging.info(f"Deleted photo message {message_id} from group {chat_id} after {delay} seconds.")
+    except Exception as e:
+        logging.error(f"Failed to delete photo message {message_id} in {chat_id}: {e}")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 
@@ -74,7 +83,7 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text(f"📌 Chat ID: <code>{chat_id}</code>\n👤 Your ID: <code>{user_id}</code>", parse_mode="HTML")
 
-# /mute command
+# /mute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /mute 12345678)")
@@ -83,11 +92,11 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_to_mute = int(context.args[0])
         muted_users.add(user_to_mute)
-        await update.message.reply_text(f"🔇 User {user_to_mute} മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു!")
+        await update.message.reply_text(f"🔇 User <code>{user_to_mute}</code> വിജയകരമായി മ്യൂട്ട് ചെയ്തു (തടഞ്ഞു)!", parse_mode="HTML")
     except ValueError:
         await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
 
-# /unmute command
+# /unmute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /unmute 12345678)")
@@ -97,7 +106,7 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_to_unmute = int(context.args[0])
         if user_to_unmute in muted_users:
             muted_users.remove(user_to_unmute)
-            await update.message.reply_text(f"🔊 User {user_to_unmute} അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!")
+            await update.message.reply_text(f"🔊 User <code>{user_to_unmute}</code> അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
         else:
             await update.message.reply_text("ℹ️ ഈ യൂസർ മ്യൂട്ട് ലിസ്റ്റിൽ ഇല്ല.")
     except ValueError:
@@ -113,9 +122,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
-    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ മെസ്സേജ് അയക്കില്ല
+    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ പി.എമ്മിൽ വിവരമറിയിക്കും, ഗ്രൂപ്പിലേക്ക് അയക്കില്ല
     if user_id in muted_users:
-        await update.message.reply_text("🚫 നിങ്ങൾ മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു.")
+        await update.message.reply_text("🚫 നിങ്ങളെ തടഞ്ഞിരിക്കുന്നു! നിങ്ങൾ ഫോട്ടോ ഇട്ടാൽ ഗ്രൂപ്പിലേക്ക് പോകില്ല.")
         return
 
     photo = update.message.photo[-1].file_id
@@ -151,13 +160,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=group_reply_markup
                 )
             else:
-                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും ബട്ടണുകളും മാത്രം അയക്കുന്നു
-                await context.bot.send_photo(
+                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും ബട്ടണുകളും അയക്കുന്നു
+                sent_msg = await context.bot.send_photo(
                     chat_id=group_id,
                     photo=photo,
                     caption=user_caption,
                     reply_markup=group_reply_markup
                 )
+                # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഫോട്ടോ ഓട്ടോമാറ്റിക്കായി ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
+                asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
+
             sent_success = True
         except Exception as e:
             logging.error(f"Error processing for group {group_id}: {e}")
