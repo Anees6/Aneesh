@@ -51,7 +51,7 @@ async def self_ping():
 # -----------------------------------------------------------
 
 # 5 മിനിറ്റിന് ശേഷം ഗ്രൂപ്പിൽ അയച്ച ഫോട്ടോ ഡിലീറ്റ് ചെയ്യുന്ന ഫങ്ഷൻ
-async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = 300):
+async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = 60):
     await asyncio.sleep(delay)
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
