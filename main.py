@@ -168,7 +168,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=group_reply_markup
                 )
                 # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഫോട്ടോ ഓട്ടോമാറ്റിക്കായി ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
-                asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
+                asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 60))
 
             sent_success = True
         except Exception as e:
