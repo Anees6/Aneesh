@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import json
 from threading import Thread
 import urllib.request
 from flask import Flask
@@ -72,7 +73,29 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulR
 INFO_ONLY_GROUP_ID = -1004376973168
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
-connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
+GROUPS_FILE = "connected_groups.json"
+
+# ഡാറ്റാബേസ്/ഫയലിൽ നിന്ന് സേവ് ചെയ്ത ഗ്രൂപ്പ് ഐഡികൾ ലോഡ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+def load_groups():
+    groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
+    if os.path.exists(GROUPS_FILE):
+        try:
+            with open(GROUPS_FILE, "r") as f:
+                saved_groups = json.load(f)
+                groups.update(saved_groups)
+        except Exception as e:
+            logging.error(f"Error loading groups file: {e}")
+    return groups
+
+# ഗ്രൂപ്പ് ഐഡികൾ ഫയലിലേക്ക് സേവ് ചെയ്യുന്ന ഫങ്ഷൻ
+def save_groups():
+    try:
+        with open(GROUPS_FILE, "w") as f:
+            json.dump(list(connected_groups), f)
+    except Exception as e:
+        logging.error(f"Error saving groups file: {e}")
+
+connected_groups = load_groups()
 
 # Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ്
 muted_users = set()
@@ -122,14 +145,32 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ (മെസ്സേജുകളിൽ നിന്നും ബോട്ടിനെ ആഡ് ചെയ്യുമ്പോൾ ഉണ്ടാകുന്ന ചേഞ്ചുകളിൽ നിന്നും)
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
-        connected_groups.add(update.effective_chat.id)
+        if update.effective_chat.id not in connected_groups:
+            connected_groups.add(update.effective_chat.id)
+            save_groups()
 
 async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat and chat.type in ["group", "supergroup"]:
         # ബോട്ട് ഗ്രൂപ്പിൽ ആഡ് ആവുകയോ ഉള്ളിൽ തുടരുകയോ ആണെങ്കിൽ ആ ഐഡി സേവ് ചെയ്യുന്നു
         if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
+            if chat.id not in connected_groups:
+                connected_groups.add(chat.id)
+                save_groups()
+
+# 'halo' എന്ന് ടൈപ്പ് ചെയ്യുമ്പോൾ ഗ്രൂപ്പ് ആക്റ്റീവ് ആക്കുകയും 2 സെക്കൻഡിനുള്ളിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുകയും ചെയ്യുന്ന ഫങ്ഷൻ
+async def activate_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat and chat.type in ["group", "supergroup"]:
+        if chat.id not in connected_groups:
             connected_groups.add(chat.id)
+            save_groups()
+            msg = await update.message.reply_text("✅ ബോട്ട് ഈ ഗ്രൂപ്പിൽ ആക്റ്റീവ് ആയി!")
+            await asyncio.sleep(2)
+            try:
+                await context.bot.delete_message(chat_id=chat.id, message_id=msg.message_id)
+            except Exception as e:
+                logging.error(f"Error deleting activation message: {e}")
 
 # ഫോട്ടോ ഹാൻഡ്‌ലർ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -241,6 +282,9 @@ def main():
     bot_app.add_handler(CommandHandler("id", get_id))
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
+    
+    # 'halo' എന്ന് ഗ്രൂപ്പിൽ അയച്ചാൽ ആക്റ്റീവ് ആക്കുന്ന ഹാൻഡ്‌ലർ
+    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Regex(r'(?i)^\s*halo\s*$'), activate_group))
     
     # ഗ്രൂപ്പുകളിൽ ബോട്ടിന്റെ പ്രവേശനവും സന്ദേശങ്ങളും ട്രാക്ക് ചെയ്യാനുള്ള ഹാൻഡ്‌ലറുകൾ
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
