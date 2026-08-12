@@ -70,6 +70,9 @@ connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
 # Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ്
 muted_users = set()
 
+# ഏറ്റവും അവസാനമായി ഗ്രൂപ്പിൽ അയച്ച Mute മെസ്സേജുകൾ ഓർത്തു വെക്കാൻ [(chat_id, message_id), ...]
+last_mute_messages = []
+
 # യൂസർമാരുടെ ഏറ്റവും അവസാനത്തെ താങ്ക്സ് മെസ്സേജ് ഐഡി സൂക്ഷിക്കാൻ
 user_last_thanks_msg = {}
 
@@ -85,6 +88,8 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # /mute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global last_mute_messages
+    
     if not context.args:
         await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /mute 12345678)")
         return
@@ -92,7 +97,46 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_to_mute = int(context.args[0])
         muted_users.add(user_to_mute)
-        await update.message.reply_text(f"🔇 User <code>{user_to_mute}</code> വിജയകരമായി മ്യൂട്ട് ചെയ്തു (തടഞ്ഞു)!", parse_mode="HTML")
+        
+        # 1. വേറെ ആളെ mute ചെയ്യുമ്പോൾ മുൻപ് അയച്ച Mute മെസ്സേജുകൾ ഡിലീറ്റ് ചെയ്യുന്നു
+        for chat_id, msg_id in last_mute_messages:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception as e:
+                logging.error(f"Failed to delete old mute message in {chat_id}: {e}")
+        last_mute_messages.clear()
+
+        # 2. യൂസറുടെ പേരും Username-ഉം കണ്ടെത്താൻ ശ്രമിക്കുന്നു
+        user_mention = f"<a href='tg://user?id={user_to_mute}'>User</a>"
+        for group_id in list(connected_groups):
+            try:
+                member = await context.bot.get_chat_member(chat_id=group_id, user_id=user_to_mute)
+                user_obj = member.user
+                user_mention = f"<a href='tg://user?id={user_to_mute}'>{user_obj.full_name}</a>"
+                if user_obj.username:
+                    user_mention += f" (@{user_obj.username})"
+                break
+            except Exception:
+                pass
+
+        mute_text = f"🔇 {user_mention} (ID: <code>{user_to_mute}</code>) മ്യൂട്ട് ചെയ്യപ്പെട്ടിരിക്കുന്നു! ഇനി ഈ യൂസറുടെ ഫോട്ടോകൾ ഗ്രൂപ്പിലേക്ക് വരില്ല."
+
+        # കമാൻഡ് അയച്ച ചാറ്റ് connected_groups-ൽ ഇല്ലെങ്കിൽ അവിടുത്തേക്ക് ഒരു കൺഫർമേഷൻ കൊടുക്കും
+        if update.effective_chat.id not in connected_groups:
+            await update.message.reply_text(f"🔇 User <code>{user_to_mute}</code> വിജയകരമായി മ്യൂട്ട് ചെയ്തു!", parse_mode="HTML")
+
+        # 3. കണക്റ്റഡ് ഗ്രൂപ്പുകളിലേക്ക് പുതിയ Mute അറിയിപ്പ് അയക്കുകയും നോട്ടിഫിക്കേഷൻ സേവ് ചെയ്യുകയും ചെയ്യുന്നു
+        for group_id in list(connected_groups):
+            try:
+                sent_msg = await context.bot.send_message(
+                    chat_id=group_id,
+                    text=mute_text,
+                    parse_mode="HTML"
+                )
+                last_mute_messages.append((group_id, sent_msg.message_id))
+            except Exception as e:
+                logging.error(f"Failed to send mute message to group {group_id}: {e}")
+
     except ValueError:
         await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
 
@@ -106,7 +150,20 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_to_unmute = int(context.args[0])
         if user_to_unmute in muted_users:
             muted_users.remove(user_to_unmute)
-            await update.message.reply_text(f"🔊 User <code>{user_to_unmute}</code> അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
+            
+            user_mention = f"<a href='tg://user?id={user_to_unmute}'>User</a>"
+            for group_id in list(connected_groups):
+                try:
+                    member = await context.bot.get_chat_member(chat_id=group_id, user_id=user_to_unmute)
+                    user_obj = member.user
+                    user_mention = f"<a href='tg://user?id={user_to_unmute}'>{user_obj.full_name}</a>"
+                    if user_obj.username:
+                        user_mention += f" (@{user_obj.username})"
+                    break
+                except Exception:
+                    pass
+
+            await update.message.reply_text(f"🔊 {user_mention} (ID: <code>{user_to_unmute}</code>) അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
         else:
             await update.message.reply_text("ℹ️ ഈ യൂസർ മ്യൂട്ട് ലിസ്റ്റിൽ ഇല്ല.")
     except ValueError:
@@ -129,6 +186,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     photo = update.message.photo[-1].file_id
     user_caption = update.message.caption or ""
+
+    # ആവശ്യപ്പെട്ട ഫോർമാറ്റിൽ Caption തയാറാക്കുന്നു
+    custom_footer = "\n\n\n━━━━━━━━━━━━━━━━━━━━━━━\n✦ Add me to your group, and I'll drop photos there!
+🛠️ Created by MalluChat Team"
+    final_caption = f"{user_caption}{custom_footer}"
 
     # ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്ന ഇൻലൈൻ ബട്ടണുകൾ
     group_keyboard = [
@@ -160,11 +222,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=group_reply_markup
                 )
             else:
-                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും ബട്ടണുകളും അയക്കുന്നു
+                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും പുതിയ ക്യാപ്ഷനും ബട്ടണുകളും അയക്കുന്നു
                 sent_msg = await context.bot.send_photo(
                     chat_id=group_id,
                     photo=photo,
-                    caption=user_caption,
+                    caption=final_caption,
                     reply_markup=group_reply_markup
                 )
                 # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഫോട്ടോ ഓട്ടോമാറ്റിക്കായി ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
@@ -237,26 +299,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-# ഫോട്ടോയ്ക്ക് താഴെ ക്യാപ്ഷൻ ഫോർമാറ്റ് ചെയ്യുന്ന ഫങ്ഷൻ:
-
-def format_photo_caption(user_caption: str = "") -> str:
-    custom_footer = (
-        "\n\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✦ Add me to your group, and I'll drop photos there!\n"
-        "🛠️ <i>Created by MalluChat Team</i>"
-    )
-    return f"{user_caption}{custom_footer}" if user_caption else custom_footer.lstrip()
-
-
-# handle_photo ഫങ്ഷനിൽ ഇതുപോലെ ഉപയോഗിക്കാം:
-user_caption = update.message.caption or ""
-final_caption = format_photo_caption(user_caption)
-
-# Photo അയക്കുമ്പോൾ:
-await context.bot.send_photo(
-    chat_id=group_id,
-    photo=photo,
-    caption=final_caption,
-    parse_mode="HTML"
-)
