@@ -5,7 +5,14 @@ from threading import Thread
 import urllib.request
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
+from telegram.ext import (
+    ApplicationBuilder, 
+    ContextTypes, 
+    MessageHandler, 
+    CommandHandler, 
+    ChatMemberHandler, 
+    filters
+)
 
 # Logging Setup
 logging.basicConfig(
@@ -112,10 +119,17 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
 
-# ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ
+# ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ (മെസ്സേജുകളിൽ നിന്നും ബോട്ടിനെ ആഡ് ചെയ്യുമ്പോൾ ഉണ്ടാകുന്ന ചേഞ്ചുകളിൽ നിന്നും)
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
+
+async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat and chat.type in ["group", "supergroup"]:
+        # ബോട്ട് ഗ്രൂപ്പിൽ ആഡ് ആവുകയോ ഉള്ളിൽ തുടരുകയോ ആണെങ്കിൽ ആ ഐഡി സേവ് ചെയ്യുന്നു
+        if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
+            connected_groups.add(chat.id)
 
 # ഫോട്ടോ ഹാൻഡ്‌ലർ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -198,7 +212,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # പുതിയ മെസ്സേജ് ഐഡി സേവ് ചെയ്യുന്നു
         user_last_thanks_msg[user_id] = thanks_msg.message_id
     else:
-        await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
+        await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് മെസ്സേജ് അയക്കാൻ സാധിക്കുന്നില്ലെന്ന് ഉറപ്പാക്കുക.")
 
 # ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -228,7 +242,10 @@ def main():
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
     
+    # ഗ്രൂപ്പുകളിൽ ബോട്ടിന്റെ പ്രവേശനവും സന്ദേശങ്ങളും ട്രാക്ക് ചെയ്യാനുള്ള ഹാൻഡ്‌ലറുകൾ
+    bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
+    
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
 
