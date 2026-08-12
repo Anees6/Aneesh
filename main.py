@@ -80,6 +80,9 @@ muted_users = set()
 # യൂസർമാരുടെ ഏറ്റവും അവസാനത്തെ താങ്ക്സ് മെസ്സേജ് ഐഡി സൂക്ഷിക്കാൻ
 user_last_thanks_msg = {}
 
+# മ്യൂട്ട് ചെയ്ത യൂസർമാർക്ക് ബോട്ട് അയക്കുന്ന മുന്നറിയിപ്പ് മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാൻ
+user_last_mute_warning_msg = {}
+
 # /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
@@ -131,14 +134,37 @@ async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYP
         if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
             connected_groups.add(chat.id)
 
+# മ്യൂട്ട് ആയ യൂസറെ മെൻഷൻ ചെയ്ത് മുന്നറിയിപ്പ് അയക്കുകയും പഴയ മുന്നറിയിപ്പ് ഡിലീറ്റ് ചെയ്യുകയും ചെയ്യുന്ന ഹെൽപ്പർ ഫങ്ഷൻ
+async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = user.id
+
+    # പഴയ മ്യൂട്ട് മെസ്സേജ് ബോട്ട് അയച്ചിട്ടുണ്ടെങ്കിൽ അത് ഡിലീറ്റ് ചെയ്യും
+    if user_id in user_last_mute_warning_msg:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=user_last_mute_warning_msg[user_id]
+            )
+        except Exception as e:
+            logging.error(f"Error deleting old mute warning message: {e}")
+
+    # യൂസറെ Mention ചെയ്തുകൊണ്ട് മെസ്സേജ് തയാറാക്കുന്നു
+    user_mention = f"<a href='tg://user?id={user_id}'>{user.full_name}</a>"
+    warning_text = f"🚫 {user_mention}, അഡ്മിൻ നിങ്ങളെ മ്യൂട്ട് (തടഞ്ഞു) ആക്കിയിരിക്കുകയാണ്! അതിനാൽ നിങ്ങൾ അയക്കുന്ന പോസ്റ്റുകൾ ഗ്രൂപ്പിലേക്ക് പോകുന്നതല്ല."
+
+    mute_msg = await update.message.reply_text(warning_text, parse_mode="HTML")
+    # പുതിയ മുന്നറിയിപ്പ് മെസ്സേജ് ഐഡി സൂക്ഷിക്കുന്നു
+    user_last_mute_warning_msg[user_id] = mute_msg.message_id
+
 # ഫോട്ടോ ഹാൻഡ്‌ലർ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
-    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ പി.എമ്മിൽ വിവരമറിയിക്കും, ഗ്രൂപ്പിലേക്ക് അയക്കില്ല
+    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ മെൻഷൻ ചെയ്തു വാണിംഗ് കൊടുക്കും, പഴയത് ഡിലീറ്റ് ചെയ്യും, ഗ്രൂപ്പിലേക്ക് അയക്കില്ല
     if user_id in muted_users:
-        await update.message.reply_text("🚫 നിങ്ങളെ തടഞ്ഞിരിക്കുന്നു! നിങ്ങൾ ഫോട്ടോ ഇട്ടാൽ ഗ്രൂപ്പിലേക്ക് പോകില്ല.")
+        await notify_muted_user(update, context)
         return
 
     photo = update.message.photo[-1].file_id
@@ -216,6 +242,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ ഇവിടെയും അറിയിക്കും
+    if user_id in muted_users:
+        await notify_muted_user(update, context)
+        return
+
     try:
         warning_msg = await update.message.reply_text(
             "⚠️ ലിങ്കുകളോ ടെക്സ്റ്റുകളോ അയക്കാൻ പാടില്ല! ഫോട്ടോകൾ മാത്രം അയക്കുക."
