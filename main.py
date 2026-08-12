@@ -187,6 +187,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     user_caption = update.message.caption or ""
 
+    # ആവശ്യപ്പെട്ട ഫോർമാറ്റിൽ Caption തയാറാക്കുന്നു
+    custom_footer = "\n\n\n━━━━━━━━━━━━━━━━━━━━━━━\nഎന്നെ നിങ്ങളുടെ ഗ്രൂപ്പിൽ ആഡ് ചെയ്താൽ നിങ്ങളുടെ ഗ്രൂപ്പിൽ ഞാൻ ഫോട്ടോസ് ഇടുന്നത് ആണ്"
+    final_caption = f"{user_caption}{custom_footer}"
+
     # ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്ന ഇൻലൈൻ ബട്ടണുകൾ
     group_keyboard = [
         [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")],
@@ -217,11 +221,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=group_reply_markup
                 )
             else:
-                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും ബട്ടണുകളും അയക്കുന്നു
+                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും പുതിയ ക്യാപ്ഷനും ബട്ടണുകളും അയക്കുന്നു
                 sent_msg = await context.bot.send_photo(
                     chat_id=group_id,
                     photo=photo,
-                    caption=user_caption,
+                    caption=final_caption,
                     reply_markup=group_reply_markup
                 )
                 # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഫോട്ടോ ഓട്ടോമാറ്റിക്കായി ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
