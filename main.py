@@ -237,3 +237,26 @@ def main():
 
 if __name__ == '__main__':
     main()
+# ഫോട്ടോയ്ക്ക് താഴെ ക്യാപ്ഷൻ ഫോർമാറ്റ് ചെയ്യുന്ന ഫങ്ഷൻ:
+
+def format_photo_caption(user_caption: str = "") -> str:
+    custom_footer = (
+        "\n\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "✦ Add me to your group, and I'll drop photos there!\n"
+        "🛠️ <i>Created by MalluChat Team</i>"
+    )
+    return f"{user_caption}{custom_footer}" if user_caption else custom_footer.lstrip()
+
+
+# handle_photo ഫങ്ഷനിൽ ഇതുപോലെ ഉപയോഗിക്കാം:
+user_caption = update.message.caption or ""
+final_caption = format_photo_caption(user_caption)
+
+# Photo അയക്കുമ്പോൾ:
+await context.bot.send_photo(
+    chat_id=group_id,
+    photo=photo,
+    caption=final_caption,
+    parse_mode="HTML"
+)
