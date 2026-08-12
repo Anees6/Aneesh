@@ -187,8 +187,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     user_caption = update.message.caption or ""
 
-    # ആവശ്യപ്പെട്ട ഫോർമാറ്റിൽ Caption തയാറാക്കുന്നു
-    custom_footer = "\n\n\n━━━━━━━━━━━━━━━━━━━━━━━\nഎന്നെ നിങ്ങളുടെ ഗ്രൂപ്പിൽ ആഡ് ചെയ്താൽ നിങ്ങളുടെ ഗ്രൂപ്പിൽ ഞാൻ ഫോട്ടോസ് ഇടുന്നത് ആണ്"
+    # ഫോട്ടോ അയക്കുമ്പോൾ മാത്രം വരാനുള്ള സ്റ്റൈലിഷ് ഇംഗ്ലീഷ് മെസ്സേജ് + മല്ലുചാറ്റ് ടീം വിവരങ്ങൾ
+    custom_footer = (
+        "\n\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "✦ Add me to your group, and I'll drop photos there!\n"
+        "🛠️ <i>Created by MalluChat Team</i>"
+    )
     final_caption = f"{user_caption}{custom_footer}"
 
     # ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്ന ഇൻലൈൻ ബട്ടണുകൾ
@@ -226,6 +231,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=group_id,
                     photo=photo,
                     caption=final_caption,
+                    parse_mode="HTML",
                     reply_markup=group_reply_markup
                 )
                 # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഫോട്ടോ ഓട്ടോമാറ്റിക്കായി ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
@@ -261,7 +267,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് ഗ്രൂപ്പിൽ Admin Permission നൽകിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
 
-# ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
+# ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും (ഇവിടെ ഈ സ്പെഷ്യൽ ഫോർമാറ്റ് ഡിസൈൻ വരില്ല)
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         warning_msg = await update.message.reply_text(
