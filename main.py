@@ -92,7 +92,33 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_to_mute = int(context.args[0])
         muted_users.add(user_to_mute)
-        await update.message.reply_text(f"🔇 User <code>{user_to_mute}</code> വിജയകരമായി മ്യൂട്ട് ചെയ്തു (തടഞ്ഞു)!", parse_mode="HTML")
+        
+        # യൂസറുടെ പേരും യൂസർനേമും കണ്ടെത്താൻ ശ്രമിക്കുന്നു
+        try:
+            member = await context.bot.get_chat_member(chat_id=update.effective_chat.id, user_id=user_to_mute)
+            user_obj = member.user
+            user_mention = f"<a href='tg://user?id={user_to_mute}'>{user_obj.full_name}</a>"
+            if user_obj.username:
+                user_mention += f" (@{user_obj.username})"
+        except Exception:
+            user_mention = f"<a href='tg://user?id={user_to_mute}'>User</a>"
+
+        mute_msg = f"🔇 {user_mention} (ID: <code>{user_to_mute}</code>) വിജയകരമായി മ്യൂട്ട് ചെയ്തു (തടഞ്ഞു)!"
+
+        # കമാൻഡ് അയച്ച ഗ്രൂപ്പിലേക്ക്/ചാറ്റിലേക്ക് മെസ്സേജ് അയക്കുന്നു
+        await update.message.reply_text(mute_msg, parse_mode="HTML")
+
+        # INFO_ONLY_GROUP_ID-ലേക്കും നോട്ടിഫിക്കേഷൻ അയക്കുന്നു (കമാൻഡ് നൽകിയത് ആ ഗ്രൂപ്പിൽ അല്ലെങ്കില്‍ മാത്രം)
+        if update.effective_chat.id != INFO_ONLY_GROUP_ID:
+            try:
+                await context.bot.send_message(
+                    chat_id=INFO_ONLY_GROUP_ID,
+                    text=f"🚫 <b>User Muted</b>\n\n👤 <b>User:</b> {user_mention}\n🆔 <b>ID:</b> <code>{user_to_mute}</code>",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logging.error(f"Failed to send mute info to log group: {e}")
+
     except ValueError:
         await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
 
@@ -106,7 +132,17 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_to_unmute = int(context.args[0])
         if user_to_unmute in muted_users:
             muted_users.remove(user_to_unmute)
-            await update.message.reply_text(f"🔊 User <code>{user_to_unmute}</code> അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
+            
+            try:
+                member = await context.bot.get_chat_member(chat_id=update.effective_chat.id, user_id=user_to_unmute)
+                user_obj = member.user
+                user_mention = f"<a href='tg://user?id={user_to_unmute}'>{user_obj.full_name}</a>"
+                if user_obj.username:
+                    user_mention += f" (@{user_obj.username})"
+            except Exception:
+                user_mention = f"<a href='tg://user?id={user_to_unmute}'>User</a>"
+
+            await update.message.reply_text(f"🔊 {user_mention} (ID: <code>{user_to_unmute}</code>) അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
         else:
             await update.message.reply_text("ℹ️ ഈ യൂസർ മ്യൂട്ട് ലിസ്റ്റിൽ ഇല്ല.")
     except ValueError:
