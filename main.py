@@ -49,7 +49,6 @@ async def self_ping():
         try:
             url = f"{render_url.rstrip('/')}/health"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-            # Non-blocking രീതിയിൽ ping അയക്കുന്നു
             await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
             logging.info("✅ Self ping successful! Server is awake.")
         except Exception as e:
@@ -69,15 +68,25 @@ async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: 
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 
-# ടെക്സ്റ്റ് മാത്രം പോകേണ്ട പ്രത്യേക ഗ്രൂപ്പ് ഐഡി
 INFO_ONLY_GROUP_ID = -1004376973168
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
 GROUPS_FILE = "connected_groups.json"
 
-# ഡാറ്റാബേസ്/ഫയലിൽ നിന്ന് സേവ് ചെയ്ത ഗ്രൂപ്പ് ഐഡികൾ ലോഡ് ചെയ്യാനുള്ള ഫങ്ഷൻ
+# ഗ്രൂപ്പ് ഐഡികൾ ലോഡ് ചെയ്യുന്നു (Env Variables + JSON file)
 def load_groups():
     groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
+    
+    # Environment variable-ൽ നിന്ന് ഐഡികൾ എടുക്കൽ
+    env_groups = os.environ.get("CONNECTED_GROUPS", "")
+    if env_groups:
+        for gid in env_groups.split(","):
+            try:
+                groups.add(int(gid.strip()))
+            except ValueError:
+                pass
+
+    # ഫയലിൽ നിന്ന് ലോഡ് ചെയ്യൽ
     if os.path.exists(GROUPS_FILE):
         try:
             with open(GROUPS_FILE, "r") as f:
@@ -87,7 +96,6 @@ def load_groups():
             logging.error(f"Error loading groups file: {e}")
     return groups
 
-# ഗ്രൂപ്പ് ഐഡികൾ ഫയലിലേക്ക് സേവ് ചെയ്യുന്ന ഫങ്ഷൻ
 def save_groups():
     try:
         with open(GROUPS_FILE, "w") as f:
@@ -97,23 +105,25 @@ def save_groups():
 
 connected_groups = load_groups()
 
-# Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ്
 muted_users = set()
-
-# യൂസർമാരുടെ ഏറ്റവും അവസാനത്തെ താങ്ക്സ് മെസ്സേജ് ഐഡി സൂക്ഷിക്കാൻ
 user_last_thanks_msg = {}
 
 # /start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
 
-# /id Command
+# /id Command (ഗ്രൂപ്പിലും പ്രവർത്തിക്കും)
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat and chat.type in ["group", "supergroup"]:
+        connected_groups.add(chat.id)
+        save_groups()
+    
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     await update.message.reply_text(f"📌 Chat ID: <code>{chat_id}</code>\n👤 Your ID: <code>{user_id}</code>", parse_mode="HTML")
 
-# /mute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
+# /mute command
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /mute 12345678)")
@@ -126,7 +136,7 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
 
-# /unmute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
+# /unmute command
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /unmute 12345678)")
@@ -142,7 +152,7 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
 
-# ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ (മെസ്സേജുകളിൽ നിന്നും ബോട്ടിനെ ആഡ് ചെയ്യുമ്പോൾ ഉണ്ടാകുന്ന ചേഞ്ചുകളിൽ നിന്നും)
+# ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ (Group & Supergroup ഫിൽട്ടർ)
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         if update.effective_chat.id not in connected_groups:
@@ -152,32 +162,31 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat and chat.type in ["group", "supergroup"]:
-        # ബോട്ട് ഗ്രൂപ്പിൽ ആഡ് ആവുകയോ ഉള്ളിൽ തുടരുകയോ ആണെങ്കിൽ ആ ഐഡി സേവ് ചെയ്യുന്നു
         if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
             if chat.id not in connected_groups:
                 connected_groups.add(chat.id)
                 save_groups()
 
-# 'halo' എന്ന് ടൈപ്പ് ചെയ്യുമ്പോൾ ഗ്രൂപ്പ് ആക്റ്റീവ് ആക്കുകയും 2 സെക്കൻഡിനുള്ളിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുകയും ചെയ്യുന്ന ഫങ്ഷൻ
+# 'halo' എന്ന് അയച്ചാൽ ഗ്രൂപ്പ് ആക്റ്റീവ് ആകുകയും 2 സെക്കൻഡിൽ മെസ്സേജ് ഡിലീറ്റ് ആവുകയും ചെയ്യും
 async def activate_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat and chat.type in ["group", "supergroup"]:
         if chat.id not in connected_groups:
             connected_groups.add(chat.id)
             save_groups()
-            msg = await update.message.reply_text("✅ ബോട്ട് ഈ ഗ്രൂപ്പിൽ ആക്റ്റീവ് ആയി!")
-            await asyncio.sleep(2)
-            try:
-                await context.bot.delete_message(chat_id=chat.id, message_id=msg.message_id)
-            except Exception as e:
-                logging.error(f"Error deleting activation message: {e}")
+        
+        msg = await update.message.reply_text("✅ ബോട്ട് ഈ ഗ്രൂപ്പിൽ ആക്റ്റീവ് ആയി!")
+        await asyncio.sleep(2)
+        try:
+            await context.bot.delete_message(chat_id=chat.id, message_id=msg.message_id)
+        except Exception as e:
+            logging.error(f"Error deleting activation message: {e}")
 
 # ഫോട്ടോ ഹാൻഡ്‌ലർ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
-    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ പി.എമ്മിൽ വിവരമറിയിക്കും, ഗ്രൂപ്പിലേക്ക് അയക്കില്ല
     if user_id in muted_users:
         await update.message.reply_text("🚫 നിങ്ങളെ തടഞ്ഞിരിക്കുന്നു! നിങ്ങൾ ഫോട്ടോ ഇട്ടാൽ ഗ്രൂപ്പിലേക്ക് പോകില്ല.")
         return
@@ -185,7 +194,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     user_caption = update.message.caption or ""
 
-    # ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്ന ഇൻലൈൻ ബട്ടണുകൾ
     group_keyboard = [
         [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")],
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
@@ -195,7 +203,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent_success = False
     for group_id in list(connected_groups):
         try:
-            # പ്രത്യേക ഗ്രൂപ്പിൽ (-1004376973168) ഫോട്ടോ ഇല്ലാതെ വിവരങ്ങൾ (Text/Details) മാത്രം അയക്കുന്നു
             if group_id == INFO_ONLY_GROUP_ID:
                 user_mention = f"<a href='tg://user?id={user_id}'>{user.full_name}</a>"
                 if user.username:
@@ -215,21 +222,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=group_reply_markup
                 )
             else:
-                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും ബട്ടണുകളും അയക്കുന്നു
                 sent_msg = await context.bot.send_photo(
                     chat_id=group_id,
                     photo=photo,
                     caption=user_caption,
                     reply_markup=group_reply_markup
                 )
-                # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഫോട്ടോ ഓട്ടോമാറ്റിക്കായി ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
                 asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
 
             sent_success = True
         except Exception as e:
             logging.error(f"Error processing for group {group_id}: {e}")
 
-    # യൂസറുടെ മുൻപത്തെ താങ്ക്സ് മെസ്സേജ് ഉണ്ടെങ്കിൽ അത് ഡിലീറ്റ് ചെയ്യും
     if user_id in user_last_thanks_msg:
         try:
             await context.bot.delete_message(
@@ -239,7 +243,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"Error deleting old thanks message: {e}")
 
-    # യൂസറുടെ പി.എമ്മിലേക്ക് (PM) അയക്കുന്ന താങ്ക്സ് ബട്ടൺ
     pm_keyboard = [
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ]
@@ -250,7 +253,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!\nനന്ദി! ഇനിയും ഫോട്ടോകൾ അയക്കുക.",
             reply_markup=pm_reply_markup
         )
-        # പുതിയ മെസ്സേജ് ഐഡി സേവ് ചെയ്യുന്നു
         user_last_thanks_msg[user_id] = thanks_msg.message_id
     else:
         await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് മെസ്സേജ് അയക്കാൻ സാധിക്കുന്നില്ലെന്ന് ഉറപ്പാക്കുക.")
@@ -267,12 +269,10 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logging.error(f"Error handling text/link: {e}")
 
-# പോസ്റ്റ് ആക്ഷൻ എക്സിക്യൂഷൻ (Self-Ping സ്റ്റാർട്ട് ചെയ്യുന്നു)
 async def post_init(application):
     asyncio.create_task(self_ping())
 
 def main():
-    # Flask web server ബാക്ക്ഗ്രൗണ്ടിൽ റൺ ചെയ്യുന്നു
     t = Thread(target=run_flask, daemon=True)
     t.start()
 
@@ -283,12 +283,15 @@ def main():
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
     
-    # 'halo' എന്ന് ഗ്രൂപ്പിൽ അയച്ചാൽ ആക്റ്റീവ് ആക്കുന്ന ഹാൻഡ്‌ലർ
-    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Regex(r'(?i)^\s*halo\s*$'), activate_group))
+    # GROUP + SUPERGROUP ഫിൽട്ടർ ചേർത്തിരിക്കുന്നു
+    group_filter = filters.ChatType.GROUPS | filters.ChatType.SUPERGROUP
+
+    # 'halo' ആക്റ്റിവേഷൻ
+    bot_app.add_handler(MessageHandler(group_filter & filters.Regex(r'(?i)^\s*halo\s*$'), activate_group))
     
-    # ഗ്രൂപ്പുകളിൽ ബോട്ടിന്റെ പ്രവേശനവും സന്ദേശങ്ങളും ട്രാക്ക് ചെയ്യാനുള്ള ഹാൻഡ്‌ലറുകൾ
+    # ഗ്രൂപ്പ് മെസ്സേജ് ട്രാക്കിംഗ്
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
-    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
+    bot_app.add_handler(MessageHandler(group_filter, track_groups))
     
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
