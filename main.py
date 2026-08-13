@@ -241,7 +241,7 @@ async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYP
         if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
             connected_groups.add(chat.id)
 
-# അഡ്മിൻ ആയിട്ടുള്ള ഗ്രൂപ്പുകളിൽ 7-ൽ കൂടുതൽ ഇംഗ്ലീഷ് അക്ഷരം വന്നാൽ ഡിലീറ്റ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
+# അഡ്മിൻ ആയിട്ടുള്ള ഗ്രൂപ്പുകളിൽ 15-ൽ കൂടുതൽ ഇംഗ്ലീഷ് അക്ഷരം വന്നാൽ ഡിലീറ്റ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
 async def handle_group_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     message = update.effective_message
@@ -266,8 +266,8 @@ async def handle_group_messages(update: Update, context: ContextTypes.DEFAULT_TY
     # ഇംഗ്ലീഷ് അക്ഷരങ്ങൾ എണ്ണുന്നു
     english_chars = len(re.findall(r'[a-zA-Z]', text_content))
 
-    # 7-ൽ കൂടുതൽ ഇംഗ്ലീഷ് അക്ഷരങ്ങൾ വന്നാൽ മാത്രം ഡിലീറ്റ് ചെയ്യും
-    if english_chars > 7:
+    # 15-ൽ കൂടുതൽ ഇംഗ്ലീഷ് അക്ഷരങ്ങൾ വന്നാൽ മാത്രം ഡിലീറ്റ് ചെയ്യും
+    if english_chars > 15:
         try:
             await message.delete()
         except Exception as e:
