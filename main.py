@@ -70,8 +70,9 @@ user_warnings = {}  # {user_id: count}
 
 user_last_thanks_msg = {}
 user_last_mute_warning_msg = {}
+group_user_last_warning_msg = {}  # {(chat_id, user_id): message_id} ഗ്രൂപ്പിലെ മുന്നറിയിപ്പുകൾ ഡിലീറ്റ് ചെയ്യാൻ
 
-# സമയം കണക്കാക്കാൻ സഹായിക്കുന്ന ഫങ്ഷൻ (eg: 10m, 2h, 1d)
+# സമയം കണക്കാക്കാൻ സഹായിക്കുന്ന ഫങ്ഷൻ
 def parse_duration(time_str: str) -> int:
     match = re.match(r"^(\d+)([mhd])$", time_str.lower())
     if not match:
@@ -136,7 +137,7 @@ async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     seconds = parse_duration(duration_str)
     
     if seconds == 0:
-        await update.message.reply_text("⚠️ സമയം തെറ്റാണ്! 10m (മിനിറ്റ്), 1h (മണിക്കൂർ), 1d (ദിവസം) എന്നീ രീതിയിൽ നൽകുക.")
+        await update.message.reply_text("⚠️ സമയം തെറ്റാണ്! 10m, 1h, 1d എന്നീ രീതിയിൽ നൽകുക.")
         return
 
     target_user_id = int(user_input) if user_input.isdigit() else None
@@ -150,7 +151,6 @@ async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     broadcast_msg = f"⏳ {user_mention} നിങ്ങളെ {duration_str} സമയത്തേക്ക് താൽക്കാലികമായി Mute ചെയ്തിരിക്കുന്നു! ഈ സമയത്ത് നിങ്ങളുടെ പോസ്റ്റുകൾ വരുന്നതല്ല."
     await broadcast_to_groups(context, broadcast_msg)
 
-    # അൺമ്യൂട്ട് ചെയ്യുന്നതിനുള്ള ടാസ്ക്
     async def auto_unmute():
         await asyncio.sleep(seconds)
         if target_user_id and target_user_id in muted_users:
@@ -241,6 +241,56 @@ async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYP
         if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
             connected_groups.add(chat.id)
 
+# അഡ്മിൻ ആയിട്ടുള്ള ഗ്രൂപ്പുകളിൽ 7-ൽ കൂടുതൽ ഇംഗ്ലീഷ് അക്ഷരം വന്നാൽ ഡിലീറ്റ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
+async def handle_group_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    message = update.effective_message
+    user = update.effective_user
+
+    if not chat or not message or not user or user.is_bot:
+        return
+
+    connected_groups.add(chat.id)
+
+    # ബോട്ട് അഡ്മിൻ ആണോ എന്ന് പരിശോധിക്കുന്നു
+    try:
+        bot_member = await context.bot.get_chat_member(chat_id=chat.id, user_id=context.bot.id)
+        if bot_member.status != "administrator":
+            return  # ബോട്ട് അഡ്മിൻ അല്ലെങ്കിൽ ഒന്നും ചെയ്യില്ല
+    except Exception as e:
+        logging.error(f"Error checking admin status in {chat.id}: {e}")
+        return
+
+    text_content = message.text or message.caption or ""
+    
+    # ഇംഗ്ലീഷ് അക്ഷരങ്ങൾ എണ്ണുന്നു
+    english_chars = len(re.findall(r'[a-zA-Z]', text_content))
+
+    # 7-ൽ കൂടുതൽ ഇംഗ്ലീഷ് അക്ഷരങ്ങൾ വന്നാൽ മാത്രം ഡിലീറ്റ് ചെയ്യും
+    if english_chars > 7:
+        try:
+            await message.delete()
+        except Exception as e:
+            logging.error(f"Error deleting user message in group {chat.id}: {e}")
+
+        key = (chat.id, user.id)
+
+        # പഴയ വാണിംഗ് മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
+        if key in group_user_last_warning_msg:
+            try:
+                await context.bot.delete_message(chat_id=chat.id, message_id=group_user_last_warning_msg[key])
+            except Exception as e:
+                logging.error(f"Error deleting old group warning message: {e}")
+
+        user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+        warn_text = f"⚠️ {user_mention}, ഇങ്ങനത്തെ സംസാരം ഇവിടെ പറ്റില്ല!"
+
+        try:
+            warn_msg = await context.bot.send_message(chat_id=chat.id, text=warn_text, parse_mode="HTML")
+            group_user_last_warning_msg[key] = warn_msg.message_id
+        except Exception as e:
+            logging.error(f"Error sending warn message in group {chat.id}: {e}")
+
 async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id in user_last_mute_warning_msg:
@@ -272,6 +322,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     photo = update.message.photo[-1].file_id
     user_caption = update.message.caption or ""
+
     group_reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]])
 
     tasks = [send_to_single_group(context, gid, photo, user, user_caption, group_reply_markup) for gid in list(connected_groups)]
@@ -311,14 +362,16 @@ def main():
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
     
-    # പുതിയ കമാൻഡുകൾ
     bot_app.add_handler(CommandHandler("tempmute", temp_mute))
     bot_app.add_handler(CommandHandler("tempban", temp_ban))
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
 
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
-    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
+    
+    # ഗ്രൂപ്പ് മെസ്സേജുകൾ ഡിലീറ്റ് ചെയ്യാനുള്ള ഹാൻഡ്‌ലർ
+    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, handle_group_messages))
+    
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
     
