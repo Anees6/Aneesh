@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import re
 from threading import Thread
 import urllib.request
 from flask import Flask
@@ -35,123 +36,201 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
 
-# Render Sleep ആകാതിരിക്കാൻ 3 മിനിറ്റ് കൂടുമ്പോൾ സ്വന്തം സർവറിലേക്ക് റിക്വസ്റ്റ് അയക്കുന്ന ഫങ്ഷൻ
 async def self_ping():
     await asyncio.sleep(10)
     render_url = os.environ.get("RENDER_EXTERNAL_URL")
-    
     if not render_url:
-        logging.warning("⚠️ RENDER_EXTERNAL_URL കണ്ടുപിടിച്ചില്ല! Render Environment Variables-ൽ ഇത് നൽകിയിട്ടുണ്ടെന്ന് ഉറപ്പുവരുത്തുക.")
         return
-
     while True:
         try:
             url = f"{render_url.rstrip('/')}/health"
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-            # Non-blocking രീതിയിൽ ping അയക്കുന്നു
             await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
-            logging.info("✅ Self ping successful! Server is awake.")
         except Exception as e:
             logging.error(f"❌ Self ping failed: {e}")
-        
-        await asyncio.sleep(180) # 3 മിനിറ്റിൽ ഒരിക്കൽ പിങ് ചെയ്യും
+        await asyncio.sleep(180)
+
 # -----------------------------------------------------------
 
-# 5 മിനിറ്റിന് ശേഷം ഗ്രൂപ്പിൽ അയച്ച ഫോട്ടോ ഡിലീറ്റ് ചെയ്യുന്ന ഫങ്ഷൻ
 async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = 300):
     await asyncio.sleep(delay)
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-        logging.info(f"Deleted photo message {message_id} from group {chat_id} after {delay} seconds.")
     except Exception as e:
         logging.error(f"Failed to delete photo message {message_id} in {chat_id}: {e}")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
-
-# ടെക്സ്റ്റ് മാത്രം പോകേണ്ട പ്രത്യേക ഗ്രൂപ്പ് ഐഡി
 INFO_ONLY_GROUP_ID = -1004376973168
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
 connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
-
-# Muted ആയ യൂസർമാരുടെ ലിസ്റ്റ്
 muted_users = set()
+banned_users = set()
+user_warnings = {}  # {user_id: count}
 
-# യൂസർമാരുടെ ഏറ്റവും അവസാനത്തെ താങ്ക്സ് മെസ്സേജ് ഐഡി സൂക്ഷിക്കാൻ
 user_last_thanks_msg = {}
-
-# മ്യൂട്ട് ചെയ്ത യൂസർമാർക്ക് ബോട്ട് അയക്കുന്ന മുന്നറിയിപ്പ് മെസ്സേജ് ഡിലീറ്റ് ചെയ്യാൻ
 user_last_mute_warning_msg = {}
 
-# /start Command
+# സമയം കണക്കാക്കാൻ സഹായിക്കുന്ന ഫങ്ഷൻ (eg: 10m, 2h, 1d)
+def parse_duration(time_str: str) -> int:
+    match = re.match(r"^(\d+)([mhd])$", time_str.lower())
+    if not match:
+        return 0
+    val, unit = match.groups()
+    val = int(val)
+    if unit == 'm':
+        return val * 60
+    elif unit == 'h':
+        return val * 3600
+    elif unit == 'd':
+        return val * 86400
+    return 0
+
+# എല്ലാ ഗ്രൂപ്പുകളിലേക്കും മെസ്സേജ് ബ്രോഡ്കാസ്റ്റ് ചെയ്യാൻ
+async def broadcast_to_groups(context, text):
+    tasks = [context.bot.send_message(chat_id=gid, text=text, parse_mode="HTML") for gid in list(connected_groups)]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക. ടെക്സ്റ്റോ ലിങ്കുകളോ അനുവദനീയമല്ല.")
+    await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക.")
 
-# /id Command
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    await update.message.reply_text(f"📌 Chat ID: <code>{chat_id}</code>\n👤 Your ID: <code>{user_id}</code>", parse_mode="HTML")
+    await update.message.reply_text(f"📌 Chat ID: <code>{update.effective_chat.id}</code>\n👤 Your ID: <code>{update.effective_user.id}</code>", parse_mode="HTML")
 
-# /mute command (User ID വച്ചോ Username വച്ചോ മ്യൂട്ട് ചെയ്യാനും ഗ്രൂപ്പുകളിലേക്ക് മെസ്സേജ് ബ്രോഡ്കാസ്റ്റ് ചെയ്യാനും സാധിക്കും)
+# Permanent Mute Command
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ ദയവായി User ID അല്ലെങ്കിൽ Username നൽകാമോ? (Eg: /mute 12345678 അല്ലെങ്കിൽ /mute @username)")
+        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /mute <User_ID/@username>")
         return
-    
     user_input = context.args[0].strip()
-    target_user_id = None
-    user_mention = ""
-
-    # User ID നൽകിയാൽ (Numeric)
-    if user_input.isdigit():
-        target_user_id = int(user_input)
-        user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>"
-    # Username നൽകിയാൽ
-    elif user_input.startswith("@"):
-        username = user_input.lstrip("@")
-        user_mention = f"@{username}"
-    else:
-        await update.message.reply_text("⚠️ നൽകിയ വിവരങ്ങൾ തെറ്റാണ്. User ID അല്ലെങ്കിൽ Username (@username) നൽകുക.")
-        return
-
-    # Muted users ലിസ്റ്റിലേക്ക് ID ഉണ്ടെങ്കിൽ ചേർക്കുന്നു
+    target_user_id = int(user_input) if user_input.isdigit() else None
+    user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>" if target_user_id else user_input
+    
     if target_user_id:
         muted_users.add(target_user_id)
-
-    # അഡ്മിന് കൺഫർമേഷൻ അയക്കുന്നു
-    await update.message.reply_text(f"🔇 {user_input} വിജയകരമായി മ്യൂട്ട് ചെയ്തു! ഗ്രൂപ്പുകളിലേക്ക് അറിയിപ്പ് അയക്കുന്നു...", parse_mode="HTML")
-
-    # ബോട്ട് ഉള്ള എല്ലാ ഗ്രൂപ്പുകളിലേക്കും മെസ്സേജ് അയക്കുന്നു
+    
+    await update.message.reply_text(f"🔇 {user_input} വിജയകരമായി മ്യൂട്ട് ചെയ്തു!", parse_mode="HTML")
     broadcast_message = f"{user_mention} നിങ്ങളെ ഞാൻ mute ആക്കി ഇനി ഞാൻ നിങ്ങളുടെ ഒരു പോസ്റ്റും ഗ്രൂപ്പിൽ ഇടില്ല"
-    
-    for group_id in list(connected_groups):
-        try:
-            await context.bot.send_message(
-                chat_id=group_id,
-                text=broadcast_message,
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logging.error(f"Failed to send mute broadcast to group {group_id}: {e}")
+    await broadcast_to_groups(context, broadcast_message)
 
-# /unmute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
+# Permanent Unmute Command
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /unmute 12345678)")
-        return
-    
+    if not context.args: return
     try:
         user_to_unmute = int(context.args[0])
         if user_to_unmute in muted_users:
             muted_users.remove(user_to_unmute)
             await update.message.reply_text(f"🔊 User <code>{user_to_unmute}</code> അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
-        else:
-            await update.message.reply_text("ℹ️ ഈ യൂസർ മ്യൂട്ട് ലിസ്റ്റിൽ ഇല്ല.")
-    except ValueError:
-        await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
+        if user_to_unmute in banned_users:
+            banned_users.remove(user_to_unmute)
+    except ValueError: pass
 
-# ഗ്രൂപ്പ് ഐഡി ട്രാക്ക് ചെയ്യാൻ (മെസ്സേജുകളിൽ നിന്നും ബോട്ടിനെ ആഡ് ചെയ്യുമ്പോൾ ഉണ്ടാകുന്ന ചേഞ്ചുകളിൽ നിന്നും)
+# Temporary Mute Command (/tempmute 12345678 10m)
+async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /tempmute <User_ID/@username> <സമയം: eg 10m, 1h, 1d>")
+        return
+    
+    user_input = context.args[0].strip()
+    duration_str = context.args[1].strip()
+    seconds = parse_duration(duration_str)
+    
+    if seconds == 0:
+        await update.message.reply_text("⚠️ സമയം തെറ്റാണ്! 10m (മിനിറ്റ്), 1h (മണിക്കൂർ), 1d (ദിവസം) എന്നീ രീതിയിൽ നൽകുക.")
+        return
+
+    target_user_id = int(user_input) if user_input.isdigit() else None
+    user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>" if target_user_id else user_input
+    
+    if target_user_id:
+        muted_users.add(target_user_id)
+
+    await update.message.reply_text(f"⏳ {user_input} എന്ന യൂസറെ {duration_str} സമയത്തേക്ക് മ്യൂട്ട് ചെയ്തു!")
+    
+    broadcast_msg = f"⏳ {user_mention} നിങ്ങളെ {duration_str} സമയത്തേക്ക് താൽക്കാലികമായി Mute ചെയ്തിരിക്കുന്നു! ഈ സമയത്ത് നിങ്ങളുടെ പോസ്റ്റുകൾ വരുന്നതല്ല."
+    await broadcast_to_groups(context, broadcast_msg)
+
+    # അൺമ്യൂട്ട് ചെയ്യുന്നതിനുള്ള ടാസ്ക്
+    async def auto_unmute():
+        await asyncio.sleep(seconds)
+        if target_user_id and target_user_id in muted_users:
+            muted_users.remove(target_user_id)
+            unmute_msg = f"🔊 {user_mention} നിങ്ങളുടെ താൽക്കാലിക മ്യൂട്ട് സമയം അവസാനിച്ചിരിക്കുന്നു! ഇനി പോസ്റ്റുകൾ അയക്കാം."
+            await broadcast_to_groups(context, unmute_msg)
+
+    asyncio.create_task(auto_unmute())
+
+# Temporary Ban Command (/tempban 12345678 30m)
+async def temp_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /tempban <User_ID/@username> <സമയം: eg 10m, 1h, 1d>")
+        return
+
+    user_input = context.args[0].strip()
+    duration_str = context.args[1].strip()
+    seconds = parse_duration(duration_str)
+
+    if seconds == 0:
+        await update.message.reply_text("⚠️ സമയം തെറ്റാണ്! 10m, 1h, 1d രീതിയിൽ നൽകുക.")
+        return
+
+    target_user_id = int(user_input) if user_input.isdigit() else None
+    user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>" if target_user_id else user_input
+
+    if target_user_id:
+        banned_users.add(target_user_id)
+
+    await update.message.reply_text(f"🚫 {user_input} എന്ന യൂസറെ {duration_str} സമയത്തേക്ക് ബാൻ ചെയ്തു!")
+
+    broadcast_msg = f"🚫 {user_mention} നിങ്ങളെ {duration_str} സമയത്തേക്ക് ബോട്ട് താൽക്കാലികമായി Ban ചെയ്തിരിക്കുന്നു!"
+    await broadcast_to_groups(context, broadcast_msg)
+
+    async def auto_unban():
+        await asyncio.sleep(seconds)
+        if target_user_id and target_user_id in banned_users:
+            banned_users.remove(target_user_id)
+            unban_msg = f"✅ {user_mention} നിങ്ങളുടെ താൽക്കാലിക ബാൻ സമയം അവസാനിച്ചിരിക്കുന്നു."
+            await broadcast_to_groups(context, unban_msg)
+
+    asyncio.create_task(auto_unban())
+
+# Warning Command (/warn 12345678)
+async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /warn <User_ID/@username>")
+        return
+
+    user_input = context.args[0].strip()
+    target_user_id = int(user_input) if user_input.isdigit() else None
+    user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>" if target_user_id else user_input
+
+    if not target_user_id:
+        await update.message.reply_text("⚠️ Warning നൽകാൻ യൂസറുടെ ഡിജിറ്റ് ID തന്നെ വേണം.")
+        return
+
+    current_warns = user_warnings.get(target_user_id, 0) + 1
+    user_warnings[target_user_id] = current_warns
+
+    if current_warns >= 3:
+        muted_users.add(target_user_id)
+        user_warnings[target_user_id] = 0
+        await update.message.reply_text(f"⚠️ {user_input} 3 വാണിംഗുകൾ പൂർത്തിയായതിനാൽ മ്യൂട്ട് ചെയ്തു!")
+        broadcast_msg = f"⚠️ {user_mention} നിങ്ങൾക്ക് 3/3 വാണിംഗുകൾ ലഭിച്ചതിനാൽ നിങ്ങളെ ബോട്ട് permanently Mute ചെയ്തിരിക്കുന്നു!"
+        await broadcast_to_groups(context, broadcast_msg)
+    else:
+        await update.message.reply_text(f"⚠️ {user_input} എന്ന യൂസർക്ക് Warning നൽകി ({current_warns}/3)")
+        broadcast_msg = f"⚠️ {user_mention}, അഡ്മിൻ നിങ്ങൾക്ക് താക്കീത് (Warning) നൽകിയിരിക്കുന്നു! [{current_warns}/3]\n3 വാണിംഗ് ആയാൽ നിങ്ങളെ മ്യൂട്ട് ചെയ്യുന്നതാണ്."
+        await broadcast_to_groups(context, broadcast_msg)
+
+# Reset Warning (/unwarn 12345678)
+async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return
+    try:
+        user_id = int(context.args[0])
+        user_warnings[user_id] = 0
+        await update.message.reply_text(f"✅ User {user_id}-ന്റെ വാണിംഗുകൾ 0 ആക്കി മാറ്റിയിട്ടുണ്ട്.")
+    except ValueError: pass
+
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
@@ -159,144 +238,72 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat and chat.type in ["group", "supergroup"]:
-        # ബോട്ട് ഗ്രൂപ്പിൽ ആഡ് ആവുകയോ ഉള്ളിൽ തുടരുകയോ ആണെങ്കിൽ ആ ഐഡി സേവ് ചെയ്യുന്നു
         if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
             connected_groups.add(chat.id)
 
-# മ്യൂട്ട് ആയ യൂസറെ മെൻഷൻ ചെയ്ത് മുന്നറിയിപ്പ് അയക്കുകയും പഴയ മുന്നറിയിപ്പ് ഡിലീറ്റ് ചെയ്യുകയും ചെയ്യുന്ന ഹെൽപ്പർ ഫങ്ഷൻ
 async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    user_id = user.id
+    if user.id in user_last_mute_warning_msg:
+        try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=user_last_mute_warning_msg[user.id])
+        except: pass
+    user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+    mute_msg = await update.message.reply_text(f"🚫 {user_mention}, അഡ്മിൻ നിങ്ങളെ മ്യൂട്ട്/ബാൻ ആക്കിയിരിക്കുകയാണ്!", parse_mode="HTML")
+    user_last_mute_warning_msg[user.id] = mute_msg.message_id
 
-    # പഴയ മ്യൂട്ട് മെസ്സേജ് ബോട്ട് അയച്ചിട്ടുണ്ടെങ്കിൽ അത് ഡിലീറ്റ് ചെയ്യും
-    if user_id in user_last_mute_warning_msg:
-        try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=user_last_mute_warning_msg[user_id]
-            )
-        except Exception as e:
-            logging.error(f"Error deleting old mute warning message: {e}")
+async def send_to_single_group(context, group_id, photo, user, user_caption, group_reply_markup):
+    try:
+        if group_id == INFO_ONLY_GROUP_ID:
+            user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+            info_text = f"📥 <b>New Photo Submitted</b>\n\n👤 <b>Name:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>\n💬 <b>Caption:</b> {user_caption or 'No Caption'}"
+            await context.bot.send_message(chat_id=group_id, text=info_text, parse_mode="HTML", reply_markup=group_reply_markup)
+        else:
+            sent_msg = await context.bot.send_photo(chat_id=group_id, photo=photo, caption=user_caption, reply_markup=group_reply_markup)
+            asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
+        return True
+    except Exception as e:
+        logging.error(f"Error in group {group_id}: {e}")
+        return False
 
-    # യൂസറെ Mention ചെയ്തുകൊണ്ട് മെസ്സേജ് തയാറാക്കുന്നു
-    user_mention = f"<a href='tg://user?id={user_id}'>{user.full_name}</a>"
-    warning_text = f"🚫 {user_mention}, അഡ്മിൻ നിങ്ങളെ മ്യൂട്ട് (തടഞ്ഞു) ആക്കിയിരിക്കുകയാണ്! അതിനാൽ നിങ്ങൾ അയക്കുന്ന പോസ്റ്റുകൾ ഗ്രൂപ്പിലേക്ക് പോകുന്നതല്ല."
-
-    mute_msg = await update.message.reply_text(warning_text, parse_mode="HTML")
-    # പുതിയ മുന്നറിയിപ്പ് മെസ്സേജ് ഐഡി സൂക്ഷിക്കുന്നു
-    user_last_mute_warning_msg[user_id] = mute_msg.message_id
-
-# ഫോട്ടോ ഹാൻഡ്‌ലർ
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    user_id = user.id
-
-    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ മെൻഷൻ ചെയ്തു വാണിംഗ് കൊടുക്കും, പഴയത് ഡിലീറ്റ് ചെയ്യും, ഗ്രൂപ്പിലേക്ക് അയക്കില്ല
-    if user_id in muted_users:
+    if user.id in muted_users or user.id in banned_users:
         await notify_muted_user(update, context)
         return
 
     photo = update.message.photo[-1].file_id
     user_caption = update.message.caption or ""
+    group_reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]])
 
-    # ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്ന ഇൻലൈൻ ബട്ടണുകൾ
-    group_keyboard = [
-        [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")],
-        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
-    ]
-    group_reply_markup = InlineKeyboardMarkup(group_keyboard)
+    tasks = [send_to_single_group(context, gid, photo, user, user_caption, group_reply_markup) for gid in list(connected_groups)]
+    results = await asyncio.gather(*tasks)
+    sent_success = any(results)
 
-    sent_success = False
-    for group_id in list(connected_groups):
-        try:
-            # പ്രത്യേക ഗ്രൂപ്പിൽ (-1004376973168) ഫോട്ടോ ഇല്ലാതെ വിവരങ്ങൾ (Text/Details) മാത്രം അയക്കുന്നു
-            if group_id == INFO_ONLY_GROUP_ID:
-                user_mention = f"<a href='tg://user?id={user_id}'>{user.full_name}</a>"
-                if user.username:
-                    user_mention += f" (@{user.username})"
-
-                info_text = (
-                    f"📥 <b>New Photo Submitted</b>\n\n"
-                    f"👤 <b>Name:</b> {user_mention}\n"
-                    f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
-                    f"💬 <b>Caption:</b> {user_caption if user_caption else 'No Caption'}"
-                )
-
-                await context.bot.send_message(
-                    chat_id=group_id,
-                    text=info_text,
-                    parse_mode="HTML",
-                    reply_markup=group_reply_markup
-                )
-            else:
-                # ബാക്കി എല്ലാ ഗ്രൂപ്പുകളിലും ഫോട്ടോയും ബട്ടണുകളും അയക്കുന്നു
-                sent_msg = await context.bot.send_photo(
-                    chat_id=group_id,
-                    photo=photo,
-                    caption=user_caption,
-                    reply_markup=group_reply_markup
-                )
-                # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഫോട്ടോ ഓട്ടോമാറ്റിക്കായി ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക് സ്റ്റാർട്ട് ചെയ്യുന്നു
-                asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
-
-            sent_success = True
-        except Exception as e:
-            logging.error(f"Error processing for group {group_id}: {e}")
-
-    # യൂസറുടെ മുൻപത്തെ താങ്ക്സ് മെസ്സേജ് ഉണ്ടെങ്കിൽ അത് ഡിലീറ്റ് ചെയ്യും
-    if user_id in user_last_thanks_msg:
-        try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=user_last_thanks_msg[user_id]
-            )
-        except Exception as e:
-            logging.error(f"Error deleting old thanks message: {e}")
-
-    # യൂസറുടെ പി.എമ്മിലേക്ക് (PM) അയക്കുന്ന താങ്ക്സ് ബട്ടൺ
-    pm_keyboard = [
-        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
-    ]
-    pm_reply_markup = InlineKeyboardMarkup(pm_keyboard)
+    if user.id in user_last_thanks_msg:
+        try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=user_last_thanks_msg[user.id])
+        except: pass
 
     if sent_success:
-        thanks_msg = await update.message.reply_text(
-            "✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!\nനന്ദി! ഇനിയും ഫോട്ടോകൾ അയക്കുക.",
-            reply_markup=pm_reply_markup
-        )
-        # പുതിയ മെസ്സേജ് ഐഡി സേവ് ചെയ്യുന്നു
-        user_last_thanks_msg[user_id] = thanks_msg.message_id
-    else:
-        await update.message.reply_text("⚠️ അയക്കാൻ കഴിഞ്ഞില്ല! ബോട്ടിന് മെസ്സേജ് അയക്കാൻ സാധിക്കുന്നില്ലെന്ന് ഉറപ്പാക്കുക.")
+        thanks_msg = await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]]))
+        user_last_thanks_msg[user.id] = thanks_msg.message_id
 
-# ടെക്സ്റ്റോ ലിങ്കുകളോ വന്നാൽ ഡിലീറ്റ് ചെയ്യും
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
-    # യൂസർ മ്യൂട്ട് ആണെങ്കിൽ ഇവിടെയും അറിയിക്കും
-    if user_id in muted_users:
+    if user_id in muted_users or user_id in banned_users:
         await notify_muted_user(update, context)
         return
-
+    warning_msg = await update.message.reply_text("⚠️ ലിങ്കുകളോ ടെക്സ്റ്റുകളോ അയക്കാൻ പാടില്ല!")
+    await asyncio.sleep(5)
     try:
-        warning_msg = await update.message.reply_text(
-            "⚠️ ലിങ്കുകളോ ടെക്സ്റ്റുകളോ അയക്കാൻ പാടില്ല! ഫോട്ടോകൾ മാത്രം അയക്കുക."
-        )
-        await asyncio.sleep(5)
         await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)
         await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=warning_msg.message_id)
-    except Exception as e:
-        logging.error(f"Error handling text/link: {e}")
+    except: pass
 
-# പോസ്റ്റ് ആക്ഷൻ എക്സിക്യൂഷൻ (Self-Ping സ്റ്റാർട്ട് ചെയ്യുന്നു)
 async def post_init(application):
     asyncio.create_task(self_ping())
 
 def main():
-    # Flask web server ബാക്ക്ഗ്രൗണ്ടിൽ റൺ ചെയ്യുന്നു
     t = Thread(target=run_flask, daemon=True)
     t.start()
-
     bot_app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
     bot_app.add_handler(CommandHandler("start", start))
@@ -304,14 +311,17 @@ def main():
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
     
-    # ഗ്രൂപ്പുകളിൽ ബോട്ടിന്റെ പ്രവേശനവും സന്ദേശങ്ങളും ട്രാക്ക് ചെയ്യാനുള്ള ഹാൻഡ്‌ലറുകൾ
+    # പുതിയ കമാൻഡുകൾ
+    bot_app.add_handler(CommandHandler("tempmute", temp_mute))
+    bot_app.add_handler(CommandHandler("tempban", temp_ban))
+    bot_app.add_handler(CommandHandler("warn", warn_user))
+    bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
+
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
-    
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
-
-    print("Bot is starting...")
+    
     bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
