@@ -93,18 +93,47 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text(f"📌 Chat ID: <code>{chat_id}</code>\n👤 Your ID: <code>{user_id}</code>", parse_mode="HTML")
 
-# /mute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
+# /mute command (User ID വച്ചോ Username വച്ചോ മ്യൂട്ട് ചെയ്യാനും ഗ്രൂപ്പുകളിലേക്ക് മെസ്സേജ് ബ്രോഡ്കാസ്റ്റ് ചെയ്യാനും സാധിക്കും)
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ ദയവായി User ID നൽകാമോ? (Eg: /mute 12345678)")
+        await update.message.reply_text("⚠️ ദയവായി User ID അല്ലെങ്കിൽ Username നൽകാമോ? (Eg: /mute 12345678 അല്ലെങ്കിൽ /mute @username)")
         return
     
-    try:
-        user_to_mute = int(context.args[0])
-        muted_users.add(user_to_mute)
-        await update.message.reply_text(f"🔇 User <code>{user_to_mute}</code> വിജയകരമായി മ്യൂട്ട് ചെയ്തു (തടഞ്ഞു)!", parse_mode="HTML")
-    except ValueError:
-        await update.message.reply_text("⚠️ നൽകിയ User ID തെറ്റാണ്.")
+    user_input = context.args[0].strip()
+    target_user_id = None
+    user_mention = ""
+
+    # User ID നൽകിയാൽ (Numeric)
+    if user_input.isdigit():
+        target_user_id = int(user_input)
+        user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>"
+    # Username നൽകിയാൽ
+    elif user_input.startswith("@"):
+        username = user_input.lstrip("@")
+        user_mention = f"@{username}"
+    else:
+        await update.message.reply_text("⚠️ നൽകിയ വിവരങ്ങൾ തെറ്റാണ്. User ID അല്ലെങ്കിൽ Username (@username) നൽകുക.")
+        return
+
+    # Muted users ലിസ്റ്റിലേക്ക് ID ഉണ്ടെങ്കിൽ ചേർക്കുന്നു
+    if target_user_id:
+        muted_users.add(target_user_id)
+
+    # അഡ്മിന് കൺഫർമേഷൻ അയക്കുന്നു
+    await update.message.reply_text(f"🔇 {user_input} വിജയകരമായി മ്യൂട്ട് ചെയ്തു! ഗ്രൂപ്പുകളിലേക്ക് അറിയിപ്പ് അയക്കുന്നു...", parse_mode="HTML")
+
+    # ബോട്ട് ഉള്ള എല്ലാ ഗ്രൂപ്പുകളിലേക്കും മെസ്സേജ് അയക്കുന്നു
+    broadcast_message = f"{user_mention} നിങ്ങളെ ഞാൻ mute ആക്കി ഇനി ഞാൻ നിങ്ങളുടെ ഒരു പോസ്റ്റും ഗ്രൂപ്പിൽ ഇടില്ല"
+    
+    for group_id in list(connected_groups):
+        try:
+            await context.bot.send_message(
+                chat_id=group_id,
+                text=broadcast_message,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logging.error(f"Failed to send mute broadcast to group {group_id}: {e}")
 
 # /unmute command (ഗ്രൂപ്പിലും പി.എമ്മിലും വർക്ക് ചെയ്യും)
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
