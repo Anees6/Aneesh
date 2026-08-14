@@ -21,6 +21,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+# ----------------- ADMIN / SPECIAL USER CONFIG -----------------
+ADMIN_USER_ID = 7965472783
+
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
 
@@ -271,8 +274,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo = update.message.photo[-1].file_id
-    user_caption = update.message.caption or ""
-    group_reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]])
+    raw_caption = update.message.caption or ""
+
+    # നിങ്ങളുടെ (ADMIN) ഫോട്ടോ ആണെങ്കിൽ caption മാറ്റമില്ലാതെ അയക്കും
+    if user.id == ADMIN_USER_ID:
+        user_caption = raw_caption
+    else:
+        # മറ്റു യൂസർമാരുടെ ഫോട്ടോകളിൽ നിന്ന് Text, User IDs, Mentions, Links എന്നിവ നീക്കുന്നു (ഫോട്ടോ മാത്രം പോകും)
+        user_caption = ""
+
+    group_reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
+        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+    ])
 
     tasks = [send_to_single_group(context, gid, photo, user, user_caption, group_reply_markup) for gid in list(connected_groups)]
     results = await asyncio.gather(*tasks)
@@ -286,17 +300,39 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         thanks_msg = await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]]))
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
+# Text/Link കൈകാര്യം ചെയ്യുന്ന ഫങ്ഷൻ
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user = update.effective_user
+    user_id = user.id
+    
     if user_id in muted_users or user_id in banned_users:
         await notify_muted_user(update, context)
         return
-    warning_msg = await update.message.reply_text("⚠️ ലിങ്കുകളോ ടെക്സ്റ്റുകളോ അയക്കാൻ പാടില്ല!")
-    await asyncio.sleep(5)
-    try:
-        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)
-        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=warning_msg.message_id)
-    except: pass
+
+    # നിങ്ങളുടെ (ADMIN_USER_ID) മെസ്സേജ് ആണെങ്കിൽ എല്ലാ ഗ്രൂപ്പുകളിലേക്കും ബോട്ട് വഴി അയക്കും
+    if user_id == ADMIN_USER_ID:
+        text_content = update.message.text
+        
+        group_reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")],
+            [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+        ])
+        
+        tasks = [
+            context.bot.send_message(
+                chat_id=gid, 
+                text=text_content, 
+                parse_mode="HTML", 
+                reply_markup=group_reply_markup
+            ) for gid in list(connected_groups)
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        await update.message.reply_text("✅ നിങ്ങളുടെ മെസ്സേജ് എല്ലാ ഗ്രൂപ്പുകളിലേക്കും വിജയകരമായി അയച്ചു!")
+        return
+
+    # മറ്റ് യൂസർമാർ ബോട്ട് ഇൻബോക്സിൽ മെസ്സേജ് അയച്ചാൽ ഇൻബോക്സിൽ മാത്രം വാണിംഗ് നൽകും (ഗ്രൂപ്പിലേക്ക് പോകില്ല)
+    await update.message.reply_text("⚠️ ടെക്സ്റ്റുകളോ ലിങ്കുകളോ അയക്കാൻ പാടില്ല! ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക.")
 
 async def post_init(application):
     asyncio.create_task(self_ping())
