@@ -73,6 +73,7 @@ user_warnings = {}  # {user_id: count}
 
 user_last_thanks_msg = {}
 user_last_mute_warning_msg = {}
+user_last_photo = {}  # യൂസർമാർ അയക്കുന്ന അവസാന ഫോട്ടോ സേവ് ചെയ്തു വെക്കാൻ {user_id: photo_file_id}
 
 # സമയം കണക്കാക്കാൻ സഹായിക്കുന്ന ഫങ്ഷൻ (eg: 10m, 2h, 1d)
 def parse_duration(time_str: str) -> int:
@@ -234,6 +235,42 @@ async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ User {user_id}-ന്റെ വാണിംഗുകൾ 0 ആക്കി മാറ്റിയിട്ടുണ്ട്.")
     except ValueError: pass
 
+# /send Command: ഒരു നിശ്ചിത യൂസറുടെ ഫോട്ടോ INFO_ONLY_GROUP_ID ലേക്ക് അയക്കാൻ
+async def send_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /send <User_ID>")
+        return
+
+    try:
+        target_user_id = int(context.args[0].strip())
+    except ValueError:
+        await update.message.reply_text("⚠️ കൃത്യമായ User ID നൽകുക.")
+        return
+
+    if target_user_id not in user_last_photo:
+        await update.message.reply_text(f"❌ User ID <code>{target_user_id}</code> ബോട്ടിന് ഫോട്ടോ ഒന്നും അയച്ചിട്ടില്ല!", parse_mode="HTML")
+        return
+
+    photo_file_id = user_last_photo[target_user_id]
+
+    group_reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
+        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+    ])
+
+    try:
+        sent_msg = await context.bot.send_photo(
+            chat_id=INFO_ONLY_GROUP_ID, 
+            photo=photo_file_id, 
+            reply_markup=group_reply_markup
+        )
+        # 5 മിനിറ്റിന് (300 sec) ശേഷം ഫോട്ടോ ഗ്രൂപ്പിൽ നിന്ന് ഡിലീറ്റ് ആകും
+        asyncio.create_task(delete_photo_after_delay(context, INFO_ONLY_GROUP_ID, sent_msg.message_id, 300))
+        await update.message.reply_text(f"✅ User <code>{target_user_id}</code>-ന്റെ ഫോട്ടോ ഗ്രൂപ്പിലേക്ക് വിജയകരമായി അയച്ചു!", parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Error sending photo via /send command: {e}")
+        await update.message.reply_text(f"❌ ഫോട്ടോ അയക്കുന്നതിൽ പിഴവ് സംഭവിച്ചു: {e}")
+
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
         connected_groups.add(update.effective_chat.id)
@@ -274,6 +311,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo = update.message.photo[-1].file_id
+    user_last_photo[user.id] = photo  # യൂസറുടെ അവസാന ഫോട്ടോയുടെ ID സേവ് ചെയ്യുന്നു
+    
     raw_caption = update.message.caption or ""
 
     # നിങ്ങളുടെ (ADMIN) ഫോട്ടോ ആണെങ്കിൽ caption മാറ്റമില്ലാതെ അയക്കും
@@ -352,6 +391,7 @@ def main():
     bot_app.add_handler(CommandHandler("tempban", temp_ban))
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
+    bot_app.add_handler(CommandHandler("send", send_user_photo))  # പുതിയ /send കമാൻഡ്
 
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
