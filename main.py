@@ -12,6 +12,7 @@ from telegram.ext import (
     MessageHandler, 
     CommandHandler, 
     ChatMemberHandler, 
+    CallbackQueryHandler,
     filters
 )
 
@@ -290,12 +291,47 @@ async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mute_msg = await update.message.reply_text(f"🚫 {user_mention}, അഡ്മിൻ നിങ്ങളെ മ്യൂട്ട്/ബാൻ ആക്കിയിരിക്കുകയാണ്!", parse_mode="HTML")
     user_last_mute_warning_msg[user.id] = mute_msg.message_id
 
+# 'The View' ബട്ടൺ അമർത്തുമ്പോൾ ഫോട്ടോ കാണിക്കാനുള്ള ഫങ്ഷൻ
+async def handle_view_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data.startswith("view_photo_"):
+        target_user_id = int(data.split("_")[2])
+        if target_user_id in user_last_photo:
+            photo_file_id = user_last_photo[target_user_id]
+            group_reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
+                [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+            ])
+            try:
+                # ബട്ടൺ ഉള്ള മെസ്സേജിന് റിപ്ലൈ ആയി ഫോട്ടോ അയക്കുന്നു
+                sent_msg = await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=photo_file_id,
+                    reply_to_message_id=query.message.message_id,
+                    reply_markup=group_reply_markup
+                )
+                asyncio.create_task(delete_photo_after_delay(context, query.message.chat_id, sent_msg.message_id, 300))
+            except Exception as e:
+                logging.error(f"Error displaying photo on view click: {e}")
+        else:
+            await query.message.reply_text("❌ ഈ ഫോട്ടോ ലഭ്യമല്ല അല്ലെങ്കിൽ വാലിഡിറ്റി അവസാനിച്ചു.")
+
 async def send_to_single_group(context, group_id, photo, user, user_caption, group_reply_markup):
     try:
         if group_id == INFO_ONLY_GROUP_ID:
             user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
             info_text = f"📥 <b>New Photo Submitted</b>\n\n👤 <b>Name:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>\n💬 <b>Caption:</b> {user_caption or 'No Caption'}"
-            await context.bot.send_message(chat_id=group_id, text=info_text, parse_mode="HTML", reply_markup=group_reply_markup)
+            
+            # INFO_ONLY_GROUP_ID -ൽ ചിത്രങ്ങൾക്ക് പകരം "The View" ബട്ടൺ കാണിക്കുന്നു
+            view_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("👁️ The View", callback_data=f"view_photo_{user.id}")],
+                [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
+                [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+            ])
+            await context.bot.send_message(chat_id=group_id, text=info_text, parse_mode="HTML", reply_markup=view_markup)
         else:
             sent_msg = await context.bot.send_photo(chat_id=group_id, photo=photo, caption=user_caption, reply_markup=group_reply_markup)
             asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
@@ -392,6 +428,9 @@ def main():
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
     bot_app.add_handler(CommandHandler("send", send_user_photo))  # പുതിയ /send കമാൻഡ്
+
+    # 'The View' ബട്ടൺ ഹാന്റ്റിൽ ചെയ്യാനുള്ള Callback Handler
+    bot_app.add_handler(CallbackQueryHandler(handle_view_button, pattern="^view_photo_"))
 
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
