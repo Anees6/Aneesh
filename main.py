@@ -22,12 +22,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ----------------- ADMIN / SPECIAL USER CONFIG -----------------
-# JSON-ൽ നിന്നുള്ള അഡ്മിൻ ID
+# ----------------- ADMIN CONFIG -----------------
 ADMIN_USER_ID = 7965472783
 NOTIFICATION_ADMIN_ID = 1087968824
 
-# മ്യൂട്ട് ബട്ടൺ അമർത്താൻ അനുമതിയുള്ളത് ഈ അഡ്മിന് മാത്രമാണ്
+# Mute ബട്ടൺ പ്രവർത്തിപ്പിക്കാൻ അനുമതിയുള്ളത് അഡ്മിന് മാത്രം
 ALLOWED_ADMINS = {ADMIN_USER_ID}
 
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
@@ -306,24 +305,28 @@ async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mute_msg = await update.message.reply_text(f"🚫 {user_mention}, അഡ്മിൻ നിങ്ങളെ മ്യൂട്ട്/ബാൻ ആക്കിയിരിക്കുകയാണ്!", parse_mode="HTML")
     user_last_mute_warning_msg[user.id] = mute_msg.message_id
 
-# ----------------- CALLBACK QUERY HANDLER (ADMIN-ONLY RESTRICTION) -----------------
+# ----------------- CALLBACK QUERY HANDLER (INSTANT MUTE ACTION) -----------------
 async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     clicker_id = query.from_user.id
 
-    # അഡ്മിൻ (7965472783) അല്ല എങ്കിൽ പ്രതികരണമൊന്നും ഉണ്ടാവില്ല
+    # അഡ്മിൻ അല്ല എങ്കിൽ ഒരു പ്രതികരണവും നടത്തില്ല
     if clicker_id not in ALLOWED_ADMINS:
         return
 
-    await query.answer()
     data = query.data
 
-    # Admin - Mute Toggle
+    # Admin - Instant Mute
     if data.startswith("pm_mute_user_"):
         target_user_id = int(data.split("_")[3])
+        
+        # തൽക്ഷണം മ്യൂട്ട് സെറ്റിലേക്ക് ചേർക്കുന്നു (Instant Mute)
         muted_users.add(target_user_id)
         
-        # Mute ചെയ്ത ശേഷം ബട്ടൺ Unmute ആയി മാറും
+        # തൽക്ഷണം അലർട്ട് നൽകുന്നു
+        await query.answer(f"⚡ User {target_user_id} തൽക്ഷണം Mute ആക്കപ്പെട്ടു!", show_alert=True)
+        
+        # ബട്ടൺ Unmute ആയി മാറ്റുന്നു
         new_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔊 Unmute User", callback_data=f"pm_unmute_user_{target_user_id}")],
             [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
@@ -334,16 +337,16 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_reply_markup(reply_markup=new_markup)
         except Exception as e:
             logging.error(f"Failed to edit markup: {e}")
-            
-        await query.answer(f"✅ User {target_user_id} വിജയകരമായി Mute ആക്കി!", show_alert=True)
 
-    # Admin - Unmute Toggle
+    # Admin - Instant Unmute
     elif data.startswith("pm_unmute_user_"):
         target_user_id = int(data.split("_")[3])
+        
         if target_user_id in muted_users:
             muted_users.remove(target_user_id)
             
-        # Unmute ചെയ്ത ശേഷം ബട്ടൺ വീണ്ടും Mute ആയി മാറും
+        await query.answer(f"🔊 User {target_user_id} Unmute ആക്കി!", show_alert=True)
+            
         new_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{target_user_id}")],
             [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
@@ -354,8 +357,6 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_reply_markup(reply_markup=new_markup)
         except Exception as e:
             logging.error(f"Failed to edit markup: {e}")
-            
-        await query.answer(f"🔊 User {target_user_id} Unmute ആക്കി!", show_alert=True)
 
 async def send_photo_to_group(context, group_id, photo_file_id, group_reply_markup):
     if group_id == SPECIFIC_LEAVE_GROUP_ID:
@@ -380,14 +381,13 @@ async def send_photo_to_group(context, group_id, photo_file_id, group_reply_mark
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
-    # Mute/Ban ഉപയോക്താക്കൾ അയച്ചാൽ ബോട്ട് അത് തടയും
+    # ⚡ MUTE CHECK (ഫോട്ടോ അയക്കുന്ന നിമിഷത്തിൽ തടയുന്നു)
     if user.id in muted_users or user.id in banned_users:
         await notify_muted_user(update, context)
         return
 
     photo = update.message.photo[-1].file_id
     
-    # PM-ൽ നിന്ന് ഫോട്ടോ ഓട്ടോ ഡിലീറ്റ് ആക്കുന്നു
     try:
         await update.message.delete()
     except Exception as e:
@@ -415,7 +415,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Failed to send notification to admin {NOTIFICATION_ADMIN_ID}: {e}")
     # ----------------------------------------------------------------------
 
-    # ഗ്രൂപ്പുകളിലേക്ക് അയക്കുമ്പോൾ 'Mute User' ബട്ടണും ചേർത്തിട്ടുണ്ട്
     photo_reply_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")],
         [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
