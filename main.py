@@ -24,7 +24,7 @@ logging.basicConfig(
 
 # ----------------- ADMIN / SPECIAL USER CONFIG -----------------
 ADMIN_USER_ID = 7965472783
-NOTIFICATION_ADMIN_ID = 1087968824  # നിങ്ങളുടെ പുതിയ നോട്ടിഫിക്കേഷൻ അഡ്മിൻ ഐഡി
+NOTIFICATION_ADMIN_ID = 1087968824
 
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
@@ -62,23 +62,23 @@ async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: 
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
     except Exception as e:
-        logging.error(f"Failed to delete photo message {message_id} in {chat_id}: {e}")
+        logging.error(f"Failed to delete message {message_id} in {chat_id}: {e}")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 
 SPECIFIC_LEAVE_GROUP_ID = -1003748242203
-DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
+# നോട്ടിഫിക്കേഷൻ പോകേണ്ട പ്രത്യേക ഗ്രൂപ്പ് ഐഡി മാത്രം
+DEDICATED_GROUP_ID = -1004376973168
 
-connected_groups = {DEFAULT_GROUP_ID}
+connected_groups = {DEDICATED_GROUP_ID}
 muted_users = set()
 banned_users = set()
 user_warnings = {}  # {user_id: count}
 
 user_last_thanks_msg = {}
 user_last_mute_warning_msg = {}
-user_last_photo = {}  # യൂസർമാർ അയക്കുന്ന അവസാന ഫോട്ടോ സേവ് ചെയ്തു വെക്കാൻ {user_id: photo_file_id}
+user_last_photo = {}  # {user_id: photo_file_id}
 
-# സമയം കണക്കാക്കാൻ സഹായിക്കുന്ന ഫങ്ഷൻ
 def parse_duration(time_str: str) -> int:
     match = re.match(r"^(\d+)([mhd])$", time_str.lower())
     if not match:
@@ -142,7 +142,7 @@ async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     seconds = parse_duration(duration_str)
     
     if seconds == 0:
-        await update.message.reply_text("⚠️ സമയം തെറ്റാണ്! 10m (മിനിറ്റ്), 1h (മണിക്കൂർ), 1d (ദിവസം) എന്നീ രീതിയിൽ നൽകുക.")
+        await update.message.reply_text("⚠️ സമയം തെറ്റാണ്! 10m, 1h, 1d എന്നീ രീതിയിൽ നൽകുക.")
         return
 
     target_user_id = int(user_input) if user_input.isdigit() else None
@@ -303,93 +303,67 @@ async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mute_msg = await update.message.reply_text(f"🚫 {user_mention}, അഡ്മിൻ നിങ്ങളെ മ്യൂട്ട്/ബാൻ ആക്കിയിരിക്കുകയാണ്!", parse_mode="HTML")
     user_last_mute_warning_msg[user.id] = mute_msg.message_id
 
-# ----------------- CALLBACK QUERY HANDLER (BUTTON ACTIONS) -----------------
+# ----------------- CALLBACK QUERY HANDLER (TOGGLE MUTE / UNMUTE) -----------------
 async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     data = query.data
 
-    # 'The View' ബട്ടൺ അമർത്തുമ്പോൾ
-    if data.startswith("view_photo_"):
-        target_user_id = int(data.split("_")[2])
-        if target_user_id in user_last_photo:
-            photo_file_id = user_last_photo[target_user_id]
-            group_reply_markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
-                [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
-            ])
-            try:
-                sent_msg = await context.bot.send_photo(
-                    chat_id=query.message.chat_id,
-                    photo=photo_file_id,
-                    reply_to_message_id=query.message.message_id,
-                    reply_markup=group_reply_markup
-                )
-                asyncio.create_task(delete_photo_after_delay(context, query.message.chat_id, sent_msg.message_id, 300))
-            except Exception as e:
-                logging.error(f"Error displaying photo on view click: {e}")
-        else:
-            await query.message.reply_text("❌ ഈ ഫോട്ടോ ലഭ്യമല്ല അല്ലെങ്കിൽ വാലിഡിറ്റി അവസാനിച്ചു.")
-
-    # 1087968824 PM-ൽ വരുന്ന Mute ബട്ടൺ അമർത്തുമ്പോൾ
-    elif data.startswith("pm_mute_user_"):
+    # Mute ടോഗിൾ ചെയ്യുമ്പോൾ
+    if data.startswith("pm_mute_user_"):
         target_user_id = int(data.split("_")[3])
-        
-        # യൂസറെ മ്യൂട്ട് ചെയ്യുന്നു
         muted_users.add(target_user_id)
         
-        user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>"
+        # ബട്ടൺ തൽക്ഷണം Unmute ആക്കി മാറ്റുന്നു
+        new_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔊 Unmute User", callback_data=f"pm_unmute_user_{target_user_id}")]
+        ])
         
-        # ബട്ടൺ ക്ലിക്ക് ചെയ്ത അഡ്മിന് അറിയിപ്പ് നൽകുന്നു
-        await query.answer(f"✅ User {target_user_id} വിജയകരമായി Mute ആക്കി!", show_alert=True)
-        
-        # ഗ്രൂപ്പിലേക്ക് സന്ദേശം അയക്കുന്നു
-        broadcast_message = f"🔇 {user_mention} നിങ്ങളെ അഡ്മിൻ Mute ചെയ്തിരിക്കുന്നു! ഇനി നിങ്ങളുടെ പോസ്റ്റുകൾ ഗ്രൂപ്പിൽ വരിയില്ല."
-        await broadcast_to_groups(context, broadcast_message)
-
-async def send_to_single_group(context, group_id, photo, user, user_caption, group_reply_markup):
-    if group_id == SPECIFIC_LEAVE_GROUP_ID:
         try:
-            await context.bot.leave_chat(chat_id=SPECIFIC_LEAVE_GROUP_ID)
-        except:
-            pass
-        return False
+            await query.edit_message_reply_markup(reply_markup=new_markup)
+        except Exception as e:
+            logging.error(f"Failed to edit markup: {e}")
+            
+        await query.answer(f"✅ User {target_user_id} വിജയകരമായി Mute ആക്കി!", show_alert=True)
 
-    try:
-        sent_msg = await context.bot.send_photo(chat_id=group_id, photo=photo, caption=user_caption, reply_markup=group_reply_markup)
-        asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
-        return True
-    except Exception as e:
-        logging.error(f"Error in group {group_id}: {e}")
-        return False
+    # Unmute ടോഗിൾ ചെയ്യുമ്പോൾ
+    elif data.startswith("pm_unmute_user_"):
+        target_user_id = int(data.split("_")[3])
+        if target_user_id in muted_users:
+            muted_users.remove(target_user_id)
+            
+        # ബട്ടൺ തൽക്ഷണം Mute ആക്കി മാറ്റുന്നു
+        new_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{target_user_id}")]
+        ])
+        
+        try:
+            await query.edit_message_reply_markup(reply_markup=new_markup)
+        except Exception as e:
+            logging.error(f"Failed to edit markup: {e}")
+            
+        await query.answer(f"🔊 User {target_user_id} Unmute ആക്കി!", show_alert=True)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
-    # Mute/Ban ആയ യൂസർമാർ അയക്കുന്ന പോസ്റ്റുകൾ ഗ്രൂപ്പിൽ വരാൻ പാടില്ല
+    # Mute/Ban ഉപയോക്താക്കളുടെ പോസ്റ്റ് ഗ്രൂപ്പിൽ വരില്ല
     if user.id in muted_users or user.id in banned_users:
         await notify_muted_user(update, context)
         return
 
     photo = update.message.photo[-1].file_id
     
-    # PM-ൽ നിന്ന് അപ്പപ്പോൾ തന്നെ ഫോട്ടോ ഡിലീറ്റ് ചെയ്യുന്നു
+    # PM-ൽ നിന്ന് ഫോട്ടോ ഓട്ടോ ഡിലീറ്റ് ആക്കുന്നു
     try:
         await update.message.delete()
     except Exception as e:
         logging.error(f"Failed to delete PM photo: {e}")
 
-    user_last_photo[user.id] = photo  # യൂസറുടെ അവസാന ഫോട്ടോയുടെ ID സേവ് ചെയ്യുന്നു
-    
-    raw_caption = update.message.caption or ""
+    user_last_photo[user.id] = photo
 
-    if user.id == ADMIN_USER_ID:
-        user_caption = raw_caption
-    else:
-        user_caption = ""
-
-    # ------------------ 1087968824 PM-ലേക്ക് മാത്രം നോട്ടിഫിക്കേഷൻ അയക്കുന്നു ------------------
+    # ------------------ 1087968824 PM നോട്ടിഫിക്കേഷൻ ------------------
     try:
         user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
         pm_notice_caption = f"📥 <b>New Photo Submitted</b>\n\n👤 <b>Sender:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>"
@@ -407,16 +381,30 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logging.error(f"Failed to send notification to admin {NOTIFICATION_ADMIN_ID}: {e}")
-    # --------------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------
+
+    # നിങ്ങളുടെ പ്രത്യേക ഗ്രൂപ്പിലേക്ക് (-1004376973168) മാത്രം Mute/Unmute സഹിതമുള്ള അറിയിപ്പ് പോകും
+    user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+    group_notice_text = f"📢 <b>New Update Submitted!</b>\n\n👤 <b>User:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>"
 
     group_reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")],
         [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ])
 
-    tasks = [send_to_single_group(context, gid, photo, user, user_caption, group_reply_markup) for gid in list(connected_groups)]
-    results = await asyncio.gather(*tasks)
-    sent_success = any(results)
+    sent_success = False
+    try:
+        sent_msg = await context.bot.send_message(
+            chat_id=DEDICATED_GROUP_ID,
+            text=group_notice_text,
+            parse_mode="HTML",
+            reply_markup=group_reply_markup
+        )
+        asyncio.create_task(delete_photo_after_delay(context, DEDICATED_GROUP_ID, sent_msg.message_id, 300))
+        sent_success = True
+    except Exception as e:
+        logging.error(f"Error in sending notice to dedicated group {DEDICATED_GROUP_ID}: {e}")
 
     if user.id in user_last_thanks_msg:
         try: 
@@ -432,7 +420,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
-# Text/Link കൈകാര്യം ചെയ്യുന്ന ഫങ്ഷൻ
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -477,21 +464,17 @@ def main():
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
     
-    # അഡ്മിൻ കമാൻഡുകൾ
     bot_app.add_handler(CommandHandler("tempmute", temp_mute))
     bot_app.add_handler(CommandHandler("tempban", temp_ban))
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
     bot_app.add_handler(CommandHandler("send", send_user_photo))
 
-    # ബട്ടൺ ക്ലിക്കുകൾ കൈകാര്യം ചെയ്യാൻ (The View, PM Mute Button)
     bot_app.add_handler(CallbackQueryHandler(handle_button_clicks))
 
-    # പ്രത്യേക ഗ്രൂപ്പിൽ (`-1003748242203`) ലെഫ്റ്റ് ആകാൻ
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
 
-    # പ്രൈവറ്റ് ചാറ്റുകൾ
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
     
