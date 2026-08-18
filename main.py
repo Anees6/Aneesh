@@ -64,7 +64,9 @@ async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: 
         logging.error(f"Failed to delete photo message {message_id} in {chat_id}: {e}")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
-INFO_ONLY_GROUP_ID = -1004376973168
+
+# താങ്കൾ നൽകിയ പുതിയ ഗ്രൂപ്പ് ഐഡി ഇവിടെ നൽകിയിരിക്കുന്നു
+INFO_ONLY_GROUP_ID = -1003748242203
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
 connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
@@ -95,6 +97,45 @@ def parse_duration(time_str: str) -> int:
 async def broadcast_to_groups(context, text):
     tasks = [context.bot.send_message(chat_id=gid, text=text, parse_mode="HTML") for gid in list(connected_groups)]
     await asyncio.gather(*tasks, return_exceptions=True)
+
+# ----------------- 15 മിനിറ്റിൽ ഓട്ടോമാറ്റിക് മെസ്സേജ് & പിൻ -----------------
+async def periodic_pin_message(context: ContextTypes.DEFAULT_TYPE):
+    pin_text = (
+        "എന്തിനാ ഫസീന ന്റെ അഡ്മിൻസ് സ്ഥാനം മാറ്റിയത് അത് കൊണ്ട് ഈ ഗ്രൂപ്പിൽ ഫോട്ടോസ് ഫോർഡഡ് ആവില്ല \n"
+        "കൂടുതൽ ഫോട്ടോ സ് കാണണം എങ്കിൽ മല്ലു ചാറ്റ് വന്നാൽ പിക്സ് ഗ്രൂപ്പ്‌ കാണും"
+    )
+    while True:
+        try:
+            sent_msg = await context.bot.send_message(
+                chat_id=INFO_ONLY_GROUP_ID,
+                text=pin_text
+            )
+            # മെസ്സേജ് ഗ്രൂപ്പിൽ പിൻ ചെയ്യുന്നു
+            await context.bot.pin_chat_message(
+                chat_id=INFO_ONLY_GROUP_ID,
+                message_id=sent_msg.message_id,
+                disable_notification=True
+            )
+        except Exception as e:
+            logging.error(f"Error in periodic_pin_message: {e}")
+        
+        # 15 മിനിറ്റ് കാത്തിരിക്കുന്നു (900 സെക്കൻഡ്)
+        await asyncio.sleep(900)
+
+# ----------------- ഈ ഗ്രൂപ്പിൽ മാത്രം ഫോർവേഡ് ഫോട്ടോകൾ ബ്ലോക്ക് ചെയ്യൽ -----------------
+async def handle_group_forwarded_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    if not msg:
+        return
+    
+    # 지정 ചെയ്ത ഗ്രൂപ്പിൽ മാത്രമായി പരിശോധിക്കുന്നു
+    if update.effective_chat.id == INFO_ONLY_GROUP_ID:
+        # ഫോട്ടോ ഫോർവേഡ് ചെയ്തതാണോ എന്ന് പരിശോധിക്കുന്നു
+        if msg.forward_date or msg.forward_from or msg.forward_from_chat or msg.forward_sender_name:
+            try:
+                await msg.delete()
+            except Exception as e:
+                logging.error(f"Failed to delete forwarded photo in group: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക.")
@@ -355,7 +396,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id == ADMIN_USER_ID:
         user_caption = raw_caption
     else:
-        # മറ്റു യൂസർമാരുടെ ഫോട്ടോകളിൽ നിന്ന് Text, User IDs, Mentions, Links എന്നിവ നീക്കുന്നു (ഫോട്ടോ മാത്രം പോകും)
+        # മറ്റു യൂസർമാരുടെ ഫോട്ടോകളിൽ നിന്ന് Text നീക്കുന്നു
         user_caption = ""
 
     group_reply_markup = InlineKeyboardMarkup([
@@ -411,6 +452,8 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def post_init(application):
     asyncio.create_task(self_ping())
+    # 15 മിനിറ്റിൽ അയക്കുന്ന ഓട്ടോമാറ്റിക് പിൻ മെസ്സേജ് ടാസ്ക്
+    asyncio.create_task(periodic_pin_message(application))
 
 def main():
     t = Thread(target=run_flask, daemon=True)
@@ -422,15 +465,18 @@ def main():
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
     
-    # പുതിയ കമാൻഡുകൾ
+    # കമാൻഡുകൾ
     bot_app.add_handler(CommandHandler("tempmute", temp_mute))
     bot_app.add_handler(CommandHandler("tempban", temp_ban))
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
-    bot_app.add_handler(CommandHandler("send", send_user_photo))  # പുതിയ /send കമാൻഡ്
+    bot_app.add_handler(CommandHandler("send", send_user_photo))
 
-    # 'The View' ബട്ടൺ ഹാന്റ്റിൽ ചെയ്യാനുള്ള Callback Handler
+    # 'The View' ബട്ടൺ ഹാന്റിൽ ചെയ്യാനുള്ള Callback Handler
     bot_app.add_handler(CallbackQueryHandler(handle_view_button, pattern="^view_photo_"))
+
+    # ഈ ഗ്രൂപ്പിൽ (-1003748242203) ഫോർവേഡ് ചെയ്യുന്ന ഫോട്ടോകൾ ഡിലീറ്റ് ചെയ്യാനുള്ള ഹാന്റ്‌ലർ
+    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.PHOTO, handle_group_forwarded_photos), group=1)
 
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
