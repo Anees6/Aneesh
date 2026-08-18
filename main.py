@@ -67,8 +67,7 @@ async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 
 SPECIFIC_LEAVE_GROUP_ID = -1003748242203
-# നോട്ടിഫിക്കേഷൻ പോകേണ്ട പ്രത്യേക ഗ്രൂപ്പ് ഐഡി മാത്രം
-DEDICATED_GROUP_ID = -1004376973168
+DEDICATED_GROUP_ID = -1004376973168  # Mute ബട്ടണും യൂസർ വിവരങ്ങളും പോകുന്ന പ്രത്യേക ഗ്രൂപ്പ്
 
 connected_groups = {DEDICATED_GROUP_ID}
 muted_users = set()
@@ -345,6 +344,26 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
             
         await query.answer(f"🔊 User {target_user_id} Unmute ആക്കി!", show_alert=True)
 
+async def send_photo_to_group(context, group_id, photo_file_id, group_reply_markup):
+    if group_id == SPECIFIC_LEAVE_GROUP_ID:
+        try:
+            await context.bot.leave_chat(chat_id=SPECIFIC_LEAVE_GROUP_ID)
+        except:
+            pass
+        return False
+
+    try:
+        sent_msg = await context.bot.send_photo(
+            chat_id=group_id, 
+            photo=photo_file_id, 
+            reply_markup=group_reply_markup
+        )
+        asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
+        return True
+    except Exception as e:
+        logging.error(f"Error sending photo to group {group_id}: {e}")
+        return False
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
@@ -383,28 +402,36 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Failed to send notification to admin {NOTIFICATION_ADMIN_ID}: {e}")
     # ----------------------------------------------------------------------
 
-    # നിങ്ങളുടെ പ്രത്യേക ഗ്രൂപ്പിലേക്ക് (-1004376973168) മാത്രം Mute/Unmute സഹിതമുള്ള അറിയിപ്പ് പോകും
-    user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
-    group_notice_text = f"📢 <b>New Update Submitted!</b>\n\n👤 <b>User:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>"
-
-    group_reply_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")],
+    # 1. ബോട്ട് ചേർത്ത എല്ലാ ഗ്രൂപ്പുകളിലേക്കും ഫോട്ടോ അയക്കുന്നു
+    photo_reply_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ])
 
-    sent_success = False
+    tasks = [send_photo_to_group(context, gid, photo, photo_reply_markup) for gid in list(connected_groups)]
+    results = await asyncio.gather(*tasks)
+    sent_success = any(results)
+
+    # 2. നിശ്ചിത നോട്ടിഫിക്കേഷൻ ഗ്രൂപ്പിലേക്ക് മാത്രം Mute/Unmute വിവരങ്ങളുടെ സന്ദേശം അയക്കുന്നു
     try:
-        sent_msg = await context.bot.send_message(
+        user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+        group_notice_text = f"📢 <b>New Update Submitted!</b>\n\n👤 <b>User:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>"
+
+        group_notice_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")],
+            [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
+            [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+        ])
+
+        sent_notice_msg = await context.bot.send_message(
             chat_id=DEDICATED_GROUP_ID,
             text=group_notice_text,
             parse_mode="HTML",
-            reply_markup=group_reply_markup
+            reply_markup=group_notice_markup
         )
-        asyncio.create_task(delete_photo_after_delay(context, DEDICATED_GROUP_ID, sent_msg.message_id, 300))
-        sent_success = True
+        asyncio.create_task(delete_photo_after_delay(context, DEDICATED_GROUP_ID, sent_notice_msg.message_id, 300))
     except Exception as e:
-        logging.error(f"Error in sending notice to dedicated group {DEDICATED_GROUP_ID}: {e}")
+        logging.error(f"Failed to send notice to dedicated group: {e}")
 
     if user.id in user_last_thanks_msg:
         try: 
