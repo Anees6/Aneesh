@@ -65,11 +65,11 @@ async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: 
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 
-# താങ്കൾ നൽകിയ പുതിയ ഗ്രൂപ്പ് ഐഡി ഇവിടെ നൽകിയിരിക്കുന്നു
-INFO_ONLY_GROUP_ID = -1003748242203
+# ലെഫ്റ്റ് ആകേണ്ട പ്രത്യേക ഗ്രൂപ്പ് ഐഡി
+SPECIFIC_LEAVE_GROUP_ID = -1003748242203
 DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
 
-connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
+connected_groups = {DEFAULT_GROUP_ID}
 muted_users = set()
 banned_users = set()
 user_warnings = {}  # {user_id: count}
@@ -98,44 +98,17 @@ async def broadcast_to_groups(context, text):
     tasks = [context.bot.send_message(chat_id=gid, text=text, parse_mode="HTML") for gid in list(connected_groups)]
     await asyncio.gather(*tasks, return_exceptions=True)
 
-# ----------------- 15 മിനിറ്റിൽ ഓട്ടോമാറ്റിക് മെസ്സേജ് & പിൻ -----------------
-async def periodic_pin_message(context: ContextTypes.DEFAULT_TYPE):
-    pin_text = (
-        "എന്തിനാ ഫസീന ന്റെ അഡ്മിൻസ് സ്ഥാനം മാറ്റിയത് അത് കൊണ്ട് ഈ ഗ്രൂപ്പിൽ ഫോട്ടോസ് ഫോർഡഡ് ആവില്ല \n"
-        "കൂടുതൽ ഫോട്ടോ സ് കാണണം എങ്കിൽ മല്ലു ചാറ്റ് വന്നാൽ പിക്സ് ഗ്രൂപ്പ്‌ കാണും"
-    )
-    while True:
+# ----------------- ഈ പ്രത്യേക ഗ്രൂപ്പിൽ നിന്ന് മാത്രം ലെഫ്റ്റ് ആകുന്നു -----------------
+async def leave_specific_group_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat and chat.id == SPECIFIC_LEAVE_GROUP_ID:
         try:
-            sent_msg = await context.bot.send_message(
-                chat_id=INFO_ONLY_GROUP_ID,
-                text=pin_text
-            )
-            # മെസ്സേജ് ഗ്രൂപ്പിൽ പിൻ ചെയ്യുന്നു
-            await context.bot.pin_chat_message(
-                chat_id=INFO_ONLY_GROUP_ID,
-                message_id=sent_msg.message_id,
-                disable_notification=True
-            )
+            await context.bot.leave_chat(chat_id=SPECIFIC_LEAVE_GROUP_ID)
+            if SPECIFIC_LEAVE_GROUP_ID in connected_groups:
+                connected_groups.remove(SPECIFIC_LEAVE_GROUP_ID)
+            logging.info(f"Left specific group: {SPECIFIC_LEAVE_GROUP_ID}")
         except Exception as e:
-            logging.error(f"Error in periodic_pin_message: {e}")
-        
-        # 15 മിനിറ്റ് കാത്തിരിക്കുന്നു (900 സെക്കൻഡ്)
-        await asyncio.sleep(900)
-
-# ----------------- ഈ ഗ്രൂപ്പിൽ മാത്രം ഫോർവേഡ് ഫോട്ടോകൾ ബ്ലോക്ക് ചെയ്യൽ -----------------
-async def handle_group_forwarded_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.effective_message
-    if not msg:
-        return
-    
-    # 지정 ചെയ്ത ഗ്രൂപ്പിൽ മാത്രമായി പരിശോധിക്കുന്നു
-    if update.effective_chat.id == INFO_ONLY_GROUP_ID:
-        # ഫോട്ടോ ഫോർവേഡ് ചെയ്തതാണോ എന്ന് പരിശോധിക്കുന്നു
-        if msg.forward_date or msg.forward_from or msg.forward_from_chat or msg.forward_sender_name:
-            try:
-                await msg.delete()
-            except Exception as e:
-                logging.error(f"Failed to delete forwarded photo in group: {e}")
+            logging.error(f"Failed to leave specific group {SPECIFIC_LEAVE_GROUP_ID}: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക.")
@@ -277,7 +250,7 @@ async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ User {user_id}-ന്റെ വാണിംഗുകൾ 0 ആക്കി മാറ്റിയിട്ടുണ്ട്.")
     except ValueError: pass
 
-# /send Command: ഒരു നിശ്ചിത യൂസറുടെ ഫോട്ടോ INFO_ONLY_GROUP_ID ലേക്ക് അയക്കാൻ
+# /send Command
 async def send_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /send <User_ID>")
@@ -300,27 +273,40 @@ async def send_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ])
 
-    try:
-        sent_msg = await context.bot.send_photo(
-            chat_id=INFO_ONLY_GROUP_ID, 
-            photo=photo_file_id, 
-            reply_markup=group_reply_markup
-        )
-        # 5 മിനിറ്റിന് (300 sec) ശേഷം ഫോട്ടോ ഗ്രൂപ്പിൽ നിന്ന് ഡിലീറ്റ് ആകും
-        asyncio.create_task(delete_photo_after_delay(context, INFO_ONLY_GROUP_ID, sent_msg.message_id, 300))
-        await update.message.reply_text(f"✅ User <code>{target_user_id}</code>-ന്റെ ഫോട്ടോ ഗ്രൂപ്പിലേക്ക് വിജയകരമായി അയച്ചു!", parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"Error sending photo via /send command: {e}")
-        await update.message.reply_text(f"❌ ഫോട്ടോ അയക്കുന്നതിൽ പിഴവ് സംഭവിച്ചു: {e}")
+    # മറ്റുള്ള ഗ്രൂപ്പുകളിലേക്ക് അയക്കുന്നു
+    for gid in list(connected_groups):
+        try:
+            sent_msg = await context.bot.send_photo(
+                chat_id=gid, 
+                photo=photo_file_id, 
+                reply_markup=group_reply_markup
+            )
+            asyncio.create_task(delete_photo_after_delay(context, gid, sent_msg.message_id, 300))
+        except Exception as e:
+            logging.error(f"Error sending photo via /send command: {e}")
+
+    await update.message.reply_text(f"✅ User <code>{target_user_id}</code>-ന്റെ ഫോട്ടോ ഗ്രൂപ്പിലേക്ക് വിജയകരമായി അയച്ചു!", parse_mode="HTML")
 
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat and update.effective_chat.type in ["group", "supergroup"]:
-        connected_groups.add(update.effective_chat.id)
+    chat = update.effective_chat
+    if chat and chat.type in ["group", "supergroup"]:
+        if chat.id == SPECIFIC_LEAVE_GROUP_ID:
+            try:
+                await context.bot.leave_chat(chat_id=SPECIFIC_LEAVE_GROUP_ID)
+            except Exception as e:
+                logging.error(f"Error leaving group: {e}")
+        else:
+            connected_groups.add(chat.id)
 
 async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat and chat.type in ["group", "supergroup"]:
-        if update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
+        if chat.id == SPECIFIC_LEAVE_GROUP_ID:
+            try:
+                await context.bot.leave_chat(chat_id=SPECIFIC_LEAVE_GROUP_ID)
+            except Exception as e:
+                logging.error(f"Error leaving group on join: {e}")
+        elif update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
             connected_groups.add(chat.id)
 
 async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -332,7 +318,7 @@ async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mute_msg = await update.message.reply_text(f"🚫 {user_mention}, അഡ്മിൻ നിങ്ങളെ മ്യൂട്ട്/ബാൻ ആക്കിയിരിക്കുകയാണ്!", parse_mode="HTML")
     user_last_mute_warning_msg[user.id] = mute_msg.message_id
 
-# 'The View' ബട്ടൺ അമർത്തുമ്പോൾ ഫോട്ടോ കാണിക്കാനുള്ള ഫങ്ഷൻ
+# 'The View' ബട്ടൺ ഹാന്റിൽ ചെയ്യാൻ
 async def handle_view_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -347,7 +333,6 @@ async def handle_view_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
             ])
             try:
-                # ബട്ടൺ ഉള്ള മെസ്സേജിന് റിപ്ലൈ ആയി ഫോട്ടോ അയക്കുന്നു
                 sent_msg = await context.bot.send_photo(
                     chat_id=query.message.chat_id,
                     photo=photo_file_id,
@@ -361,21 +346,16 @@ async def handle_view_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.message.reply_text("❌ ഈ ഫോട്ടോ ലഭ്യമല്ല അല്ലെങ്കിൽ വാലിഡിറ്റി അവസാനിച്ചു.")
 
 async def send_to_single_group(context, group_id, photo, user, user_caption, group_reply_markup):
+    if group_id == SPECIFIC_LEAVE_GROUP_ID:
+        try:
+            await context.bot.leave_chat(chat_id=SPECIFIC_LEAVE_GROUP_ID)
+        except:
+            pass
+        return False
+
     try:
-        if group_id == INFO_ONLY_GROUP_ID:
-            user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
-            info_text = f"📥 <b>New Photo Submitted</b>\n\n👤 <b>Name:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>\n💬 <b>Caption:</b> {user_caption or 'No Caption'}"
-            
-            # INFO_ONLY_GROUP_ID -ൽ ചിത്രങ്ങൾക്ക് പകരം "The View" ബട്ടൺ കാണിക്കുന്നു
-            view_markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("👁️ The View", callback_data=f"view_photo_{user.id}")],
-                [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
-                [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
-            ])
-            await context.bot.send_message(chat_id=group_id, text=info_text, parse_mode="HTML", reply_markup=view_markup)
-        else:
-            sent_msg = await context.bot.send_photo(chat_id=group_id, photo=photo, caption=user_caption, reply_markup=group_reply_markup)
-            asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
+        sent_msg = await context.bot.send_photo(chat_id=group_id, photo=photo, caption=user_caption, reply_markup=group_reply_markup)
+        asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
         return True
     except Exception as e:
         logging.error(f"Error in group {group_id}: {e}")
@@ -388,15 +368,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo = update.message.photo[-1].file_id
+    
+    # ------------------ PM-ൽ നിന്ന് അപ്പപ്പോൾ തന്നെ ഫോട്ടോ ഡിലീറ്റ് ചെയ്യുന്നു ------------------
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logging.error(f"Failed to delete PM photo: {e}")
+
     user_last_photo[user.id] = photo  # യൂസറുടെ അവസാന ഫോട്ടോയുടെ ID സേവ് ചെയ്യുന്നു
     
     raw_caption = update.message.caption or ""
 
-    # നിങ്ങളുടെ (ADMIN) ഫോട്ടോ ആണെങ്കിൽ caption മാറ്റമില്ലാതെ അയക്കും
     if user.id == ADMIN_USER_ID:
         user_caption = raw_caption
     else:
-        # മറ്റു യൂസർമാരുടെ ഫോട്ടോകളിൽ നിന്ന് Text നീക്കുന്നു
         user_caption = ""
 
     group_reply_markup = InlineKeyboardMarkup([
@@ -409,11 +394,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent_success = any(results)
 
     if user.id in user_last_thanks_msg:
-        try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=user_last_thanks_msg[user.id])
-        except: pass
+        try: 
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=user_last_thanks_msg[user.id])
+        except: 
+            pass
 
     if sent_success:
-        thanks_msg = await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]]))
+        thanks_msg = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]])
+        )
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
 # Text/Link കൈകാര്യം ചെയ്യുന്ന ഫങ്ഷൻ
@@ -425,7 +416,7 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         await notify_muted_user(update, context)
         return
 
-    # നിങ്ങളുടെ (ADMIN_USER_ID) മെസ്സേജ് ആണെങ്കിൽ എല്ലാ ഗ്രൂപ്പുകളിലേക്കും ബോട്ട് വഴി അയക്കും
+    # അഡ്മിൻ മെസ്സേജ് അയക്കുമ്പോൾ
     if user_id == ADMIN_USER_ID:
         text_content = update.message.text
         
@@ -440,20 +431,17 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
                 text=text_content, 
                 parse_mode="HTML", 
                 reply_markup=group_reply_markup
-            ) for gid in list(connected_groups)
+            ) for gid in list(connected_groups) if gid != SPECIFIC_LEAVE_GROUP_ID
         ]
         await asyncio.gather(*tasks, return_exceptions=True)
         
         await update.message.reply_text("✅ നിങ്ങളുടെ മെസ്സേജ് എല്ലാ ഗ്രൂപ്പുകളിലേക്കും വിജയകരമായി അയച്ചു!")
         return
 
-    # മറ്റ് യൂസർമാർ ബോട്ട് ഇൻബോക്സിൽ മെസ്സേജ് അയച്ചാൽ ഇൻബോക്സിൽ മാത്രം വാണിംഗ് നൽകും (ഗ്രൂപ്പിലേക്ക് പോകില്ല)
     await update.message.reply_text("⚠️ ടെക്സ്റ്റുകളോ ലിങ്കുകളോ അയക്കാൻ പാടില്ല! ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക.")
 
 async def post_init(application):
     asyncio.create_task(self_ping())
-    # 15 മിനിറ്റിൽ അയക്കുന്ന ഓട്ടോമാറ്റിക് പിൻ മെസ്സേജ് ടാസ്ക്
-    asyncio.create_task(periodic_pin_message(application))
 
 def main():
     t = Thread(target=run_flask, daemon=True)
@@ -465,21 +453,21 @@ def main():
     bot_app.add_handler(CommandHandler("mute", mute_user))
     bot_app.add_handler(CommandHandler("unmute", unmute_user))
     
-    # കമാൻഡുകൾ
+    # അഡ്മിൻ കമാൻഡുകൾ
     bot_app.add_handler(CommandHandler("tempmute", temp_mute))
     bot_app.add_handler(CommandHandler("tempban", temp_ban))
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
     bot_app.add_handler(CommandHandler("send", send_user_photo))
 
-    # 'The View' ബട്ടൺ ഹാന്റിൽ ചെയ്യാനുള്ള Callback Handler
+    # 'The View' ബട്ടൺ
     bot_app.add_handler(CallbackQueryHandler(handle_view_button, pattern="^view_photo_"))
 
-    # ഈ ഗ്രൂപ്പിൽ (-1003748242203) ഫോർവേഡ് ചെയ്യുന്ന ഫോട്ടോകൾ ഡിലീറ്റ് ചെയ്യാനുള്ള ഹാന്റ്‌ലർ
-    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.PHOTO, handle_group_forwarded_photos), group=1)
-
+    # പ്രത്യേക ഗ്രൂപ്പിൽ (`-1003748242203`) മാത്രം ആഡ് ആയാൽ സ്വയം ലെഫ്റ്റ് ആകുന്നു
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
+
+    # പ്രൈവറ്റ് ചാറ്റുകൾ
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
     
