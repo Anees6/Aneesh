@@ -29,6 +29,12 @@ NOTIFICATION_ADMIN_ID = 1087968824
 # Mute ബട്ടൺ പ്രവർത്തിപ്പിക്കാൻ അനുമതിയുള്ളത് അഡ്മിന് മാത്രം
 ALLOWED_ADMINS = {ADMIN_USER_ID}
 
+# ----------------- TARGET GROUP CONFIG -----------------
+TARGET_GROUP_ID = -1003898567321
+
+# ----------------- PHOTO TOGGLE FEATURE -----------------
+photo_forward_enabled = True  # Default ആയി ON ആയിരിക്കും
+
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
 
@@ -80,6 +86,9 @@ user_last_thanks_msg = {}
 user_last_mute_warning_msg = {}
 user_last_photo = {}  # {user_id: photo_file_id}
 
+# മറ്റ് ഗ്രൂപ്പുകളിലെ പഴയ നോട്ടീസ് മെസ്സേജ് ഐഡി സേവ് ചെയ്യാൻ {chat_id: message_id}
+last_notice_messages = {}
+
 def parse_duration(time_str: str) -> int:
     match = re.match(r"^(\d+)([mhd])$", time_str.lower())
     if not match:
@@ -103,6 +112,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📌 Chat ID: <code>{update.effective_chat.id}</code>\n👤 Your ID: <code>{update.effective_user.id}</code>", parse_mode="HTML")
+
+# --- ON / OFF COMMANDS FOR PHOTO FORWARDING ---
+async def photo_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global photo_forward_enabled
+    if update.effective_user.id not in ALLOWED_ADMINS:
+        return
+    photo_forward_enabled = True
+    await update.message.reply_text("🖼️ ഫോട്ടോ ഫോർവേഡിംഗ് **ON** ആക്കിയിരിക്കുന്നു! എല്ലാ ഗ്രൂപ്പുകളിലേക്കും ഫോട്ടോകൾ പോകും.")
+
+async def photo_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global photo_forward_enabled
+    if update.effective_user.id not in ALLOWED_ADMINS:
+        return
+    photo_forward_enabled = False
+    await update.message.reply_text("🚫 ഫോട്ടോ ഫോർവേഡിംഗ് **OFF** ആക്കിയിരിക്കുന്നു! ഇനി മെയിൻ ഗ്രൂപ്പിൽ മാത്രം ഫോട്ടോ പോകും, മറ്റു ഗ്രൂപ്പുകളിൽ നോട്ടീസ് കാണിക്കും.")
 
 # Permanent Mute Command
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -261,18 +285,17 @@ async def send_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ])
 
-    for gid in list(connected_groups):
-        try:
-            sent_msg = await context.bot.send_photo(
-                chat_id=gid, 
-                photo=photo_file_id, 
-                reply_markup=group_reply_markup
-            )
-            asyncio.create_task(delete_photo_after_delay(context, gid, sent_msg.message_id, 300))
-        except Exception as e:
-            logging.error(f"Error sending photo via /send command: {e}")
-
-    await update.message.reply_text(f"✅ User <code>{target_user_id}</code>-ന്റെ ഫോട്ടോ ഗ്രൂപ്പിലേക്ക് വിജയകരമായി അയച്ചു!", parse_mode="HTML")
+    try:
+        sent_msg = await context.bot.send_photo(
+            chat_id=TARGET_GROUP_ID, 
+            photo=photo_file_id, 
+            reply_markup=group_reply_markup
+        )
+        asyncio.create_task(delete_photo_after_delay(context, TARGET_GROUP_ID, sent_msg.message_id, 300))
+        await update.message.reply_text(f"✅ User <code>{target_user_id}</code>-ന്റെ ഫോട്ടോ ഗ്രൂപ്പിലേക്ക് വിജയകരമായി അയച്ചു!", parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Error sending photo via /send command: {e}")
+        await update.message.reply_text("❌ ഫോട്ടോ അയക്കുന്നതിൽ പിഴവ് സംഭവിച്ചു.")
 
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -310,23 +333,16 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     clicker_id = query.from_user.id
 
-    # അഡ്മിൻ അല്ല എങ്കിൽ ഒരു പ്രതികരണവും നടത്തില്ല
     if clicker_id not in ALLOWED_ADMINS:
         return
 
     data = query.data
 
-    # Admin - Instant Mute
     if data.startswith("pm_mute_user_"):
         target_user_id = int(data.split("_")[3])
-        
-        # തൽക്ഷണം മ്യൂട്ട് സെറ്റിലേക്ക് ചേർക്കുന്നു (Instant Mute)
         muted_users.add(target_user_id)
-        
-        # തൽക്ഷണം അലർട്ട് നൽകുന്നു
         await query.answer(f"⚡ User {target_user_id} തൽക്ഷണം Mute ആക്കപ്പെട്ടു!", show_alert=True)
         
-        # ബട്ടൺ Unmute ആയി മാറ്റുന്നു
         new_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔊 Unmute User", callback_data=f"pm_unmute_user_{target_user_id}")],
             [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
@@ -338,10 +354,8 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as e:
             logging.error(f"Failed to edit markup: {e}")
 
-    # Admin - Instant Unmute
     elif data.startswith("pm_unmute_user_"):
         target_user_id = int(data.split("_")[3])
-        
         if target_user_id in muted_users:
             muted_users.remove(target_user_id)
             
@@ -381,7 +395,6 @@ async def send_photo_to_group(context, group_id, photo_file_id, group_reply_mark
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
-    # ⚡ MUTE CHECK (ഫോട്ടോ അയക്കുന്ന നിമിഷത്തിൽ തടയുന്നു)
     if user.id in muted_users or user.id in banned_users:
         await notify_muted_user(update, context)
         return
@@ -421,9 +434,39 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ])
 
-    tasks = [send_photo_to_group(context, gid, photo, photo_reply_markup) for gid in list(connected_groups)]
-    results = await asyncio.gather(*tasks)
-    sent_success = any(results)
+    # 🎯 ഫോട്ടോ നിങ്ങളുടെ മെയിൻ ഗ്രൂപ്പിലേക്ക് (TARGET_GROUP_ID) മാത്രം അയക്കുന്നു
+    sent_success = await send_photo_to_group(context, TARGET_GROUP_ID, photo, photo_reply_markup)
+
+    # 🔄 OFF ആണെങ്കിൽ മറ്റു ഗ്രൂപ്പുകളിൽ ഫോട്ടോ കാണില്ല, പകരം മെസ്സേജ് വരും (പഴയത് അപ്പോൾ തന്നെ ഡിലീറ്റ് ചെയ്യും)
+    if photo_forward_enabled:
+        # ON ആയിരിക്കുമ്പോൾ എല്ലാ ഗ്രൂപ്പുകളിലേക്കും ഫോട്ടോ അയക്കുന്നു
+        for gid in list(connected_groups):
+            if gid != TARGET_GROUP_ID and gid != SPECIFIC_LEAVE_GROUP_ID:
+                await send_photo_to_group(context, gid, photo, photo_reply_markup)
+    else:
+        # OFF ആയിരിക്കുമ്പോൾ മെസ്സേജ് കാണിക്കുന്നു (പഴയ മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് പുതിയത് അയക്കും)
+        other_group_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+        ])
+        
+        # 📌 പുതിയ മെസ്സേജ് ടെക്സ്റ്റ്
+        other_msg = "ഇനി മുതൽ എനിക്ക് അയക്കുന്ന ഫോട്ടോസ് ഈ ഗ്രൂപ്പിൽ കാണിക്കില്ല കാണണം എങ്കിൽ മല്ലു ചാറ്റ് ഗ്രൂപ്പിൽ വന്നാൽ പിക് ഗ്രൂപ്പ്‌ ലിങ്ക് കാണാം"
+
+        for gid in list(connected_groups):
+            if gid != TARGET_GROUP_ID and gid != SPECIFIC_LEAVE_GROUP_ID:
+                try:
+                    # പഴയ മെസ്സേജ് അപ്പോൾ തന്നെ ഡിലീറ്റ് ചെയ്യുന്നു
+                    if gid in last_notice_messages:
+                        try:
+                            await context.bot.delete_message(chat_id=gid, message_id=last_notice_messages[gid])
+                        except Exception as e:
+                            logging.error(f"Failed to delete previous notice in {gid}: {e}")
+
+                    # പുതിയ മെസ്സേജ് അയച്ച് ഐഡി സേവ് ചെയ്യുന്നു
+                    sent_notice = await context.bot.send_message(chat_id=gid, text=other_msg, reply_markup=other_group_markup)
+                    last_notice_messages[gid] = sent_notice.message_id
+                except Exception as e:
+                    logging.error(f"Failed to send redirect message to {gid}: {e}")
 
     if user.id in user_last_thanks_msg:
         try: 
@@ -488,6 +531,10 @@ def main():
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
     bot_app.add_handler(CommandHandler("send", send_user_photo))
+
+    # Photo ON/OFF കമാൻഡ് ഹാൻഡ്‌ലറുകൾ
+    bot_app.add_handler(CommandHandler("photoon", photo_on))
+    bot_app.add_handler(CommandHandler("photooff", photo_off))
 
     bot_app.add_handler(CallbackQueryHandler(handle_button_clicks))
 
