@@ -392,21 +392,54 @@ async def send_photo_to_group(context, group_id, photo_file_id, group_reply_mark
         logging.error(f"Error sending photo to group {group_id}: {e}")
         return False
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    
-    if user.id in muted_users or user.id in banned_users:
-        await notify_muted_user(update, context)
-        return
+# ------------------ FAST FORWARD PROCESS ------------------
+async def process_photo_broadcast(context, user, photo):
+    photo_reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")],
+        [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
+        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+    ])
 
-    photo = update.message.photo[-1].file_id
-    
-    try:
-        await update.message.delete()
-    except Exception as e:
-        logging.error(f"Failed to delete PM photo: {e}")
+    # 🎯 ഫോട്ടോ നിങ്ങളുടെ മെയിൻ ഗ്രൂപ്പിലേക്ക് തൽക്ഷണം അയക്കുന്നു
+    await send_photo_to_group(context, TARGET_GROUP_ID, photo, photo_reply_markup)
 
-    user_last_photo[user.id] = photo
+    # 🔄 OFF ആണെങ്കിൽ മറ്റു ഗ്രൂപ്പുകളിൽ ഫോട്ടോ കാണില്ല, പകരം മെസ്സേജ് വരും
+    if photo_forward_enabled:
+        # ON ആയിരിക്കുമ്പോൾ മറ്റ് ഗ്രൂപ്പുകളിലേക്ക് ആസിങ്ക് ആയി തൽക്ഷണം അയക്കുന്നു
+        tasks = [
+            send_photo_to_group(context, gid, photo, photo_reply_markup)
+            for gid in list(connected_groups)
+            if gid != TARGET_GROUP_ID and gid != SPECIFIC_LEAVE_GROUP_ID
+        ]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    else:
+        # OFF ആയിരിക്കുമ്പോൾ നോട്ടീസ് സന്ദേശം സ്പീഡിൽ അയക്കുന്നു
+        other_group_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
+        ])
+        other_msg = "ഇനി മുതൽ എനിക്ക് അയക്കുന്ന ഫോട്ടോസ് ഈ ഗ്രൂപ്പിൽ കാണിക്കില്ല കാണണം എങ്കിൽ മല്ലു ചാറ്റ് ഗ്രൂപ്പിൽ വന്നാൽ പിക് ഗ്രൂപ്പ്‌ ലിങ്ക് കാണാം"
+
+        async def send_notice(gid):
+            try:
+                if gid in last_notice_messages:
+                    try:
+                        await context.bot.delete_message(chat_id=gid, message_id=last_notice_messages[gid])
+                    except Exception:
+                        pass
+
+                sent_notice = await context.bot.send_message(chat_id=gid, text=other_msg, reply_markup=other_group_markup)
+                last_notice_messages[gid] = sent_notice.message_id
+            except Exception as e:
+                logging.error(f"Failed to send redirect message to {gid}: {e}")
+
+        notice_tasks = [
+            send_notice(gid) 
+            for gid in list(connected_groups) 
+            if gid != TARGET_GROUP_ID and gid != SPECIFIC_LEAVE_GROUP_ID
+        ]
+        if notice_tasks:
+            await asyncio.gather(*notice_tasks, return_exceptions=True)
 
     # ------------------ 1087968824 PM നോട്ടിഫിക്കേഷൻ ------------------
     try:
@@ -426,61 +459,40 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logging.error(f"Failed to send notification to admin {NOTIFICATION_ADMIN_ID}: {e}")
-    # ----------------------------------------------------------------------
 
-    photo_reply_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")],
-        [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
-        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
-    ])
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    
+    if user.id in muted_users or user.id in banned_users:
+        await notify_muted_user(update, context)
+        return
 
-    # 🎯 ഫോട്ടോ നിങ്ങളുടെ മെയിൻ ഗ്രൂപ്പിലേക്ക് (TARGET_GROUP_ID) മാത്രം അയക്കുന്നു
-    sent_success = await send_photo_to_group(context, TARGET_GROUP_ID, photo, photo_reply_markup)
+    photo = update.message.photo[-1].file_id
+    
+    # ⚡ PM-ലെ മെസ്സേജ് ഉടൻ ഡിലീറ്റ് ചെയ്യുക
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logging.error(f"Failed to delete PM photo: {e}")
 
-    # 🔄 OFF ആണെങ്കിൽ മറ്റു ഗ്രൂപ്പുകളിൽ ഫോട്ടോ കാണില്ല, പകരം മെസ്സേജ് വരും (പഴയത് അപ്പോൾ തന്നെ ഡിലീറ്റ് ചെയ്യും)
-    if photo_forward_enabled:
-        # ON ആയിരിക്കുമ്പോൾ എല്ലാ ഗ്രൂപ്പുകളിലേക്കും ഫോട്ടോ അയക്കുന്നു
-        for gid in list(connected_groups):
-            if gid != TARGET_GROUP_ID and gid != SPECIFIC_LEAVE_GROUP_ID:
-                await send_photo_to_group(context, gid, photo, photo_reply_markup)
-    else:
-        # OFF ആയിരിക്കുമ്പോൾ മെസ്സേജ് കാണിക്കുന്നു (പഴയ മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് പുതിയത് അയക്കും)
-        other_group_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
-        ])
-        
-        # 📌 പുതിയ മെസ്സേജ് ടെക്സ്റ്റ്
-        other_msg = "ഇനി മുതൽ എനിക്ക് അയക്കുന്ന ഫോട്ടോസ് ഈ ഗ്രൂപ്പിൽ കാണിക്കില്ല കാണണം എങ്കിൽ മല്ലു ചാറ്റ് ഗ്രൂപ്പിൽ വന്നാൽ പിക് ഗ്രൂപ്പ്‌ ലിങ്ക് കാണാം"
+    user_last_photo[user.id] = photo
 
-        for gid in list(connected_groups):
-            if gid != TARGET_GROUP_ID and gid != SPECIFIC_LEAVE_GROUP_ID:
-                try:
-                    # പഴയ മെസ്സേജ് അപ്പോൾ തന്നെ ഡിലീറ്റ് ചെയ്യുന്നു
-                    if gid in last_notice_messages:
-                        try:
-                            await context.bot.delete_message(chat_id=gid, message_id=last_notice_messages[gid])
-                        except Exception as e:
-                            logging.error(f"Failed to delete previous notice in {gid}: {e}")
-
-                    # പുതിയ മെസ്സേജ് അയച്ച് ഐഡി സേവ് ചെയ്യുന്നു
-                    sent_notice = await context.bot.send_message(chat_id=gid, text=other_msg, reply_markup=other_group_markup)
-                    last_notice_messages[gid] = sent_notice.message_id
-                except Exception as e:
-                    logging.error(f"Failed to send redirect message to {gid}: {e}")
-
+    # ⚡ യൂസർക്ക് താങ്ക്സ് മെസ്സേജ് സ്പോട്ടിൽ നൽകുക
     if user.id in user_last_thanks_msg:
         try: 
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=user_last_thanks_msg[user.id])
         except: 
             pass
 
-    if sent_success:
-        thanks_msg = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]])
-        )
-        user_last_thanks_msg[user.id] = thanks_msg.message_id
+    thanks_msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]])
+    )
+    user_last_thanks_msg[user.id] = thanks_msg.message_id
+
+    # 🚀 ഗ്രൂപ്പുകളിലേക്കും അഡ്മിനിലേക്കും ഫോർവേഡ് ചെയ്യുന്നത് പശ്ചാത്തലത്തിൽ തത്സമയം (Fastest Background Task) നടക്കും
+    asyncio.create_task(process_photo_broadcast(context, user, photo))
 
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
