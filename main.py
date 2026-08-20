@@ -5,6 +5,8 @@ import re
 from threading import Thread
 import urllib.request
 from flask import Flask
+import firebase_admin
+from firebase_admin import credentials, db
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, 
@@ -21,6 +23,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+
+# ----------------- FIREBASE SETUP -----------------
+try:
+    cred = credentials.Certificate("firebase_key.json")
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': 'https://malluchat-jl7165-default-rtdb.firebaseio.com/'
+    })
+    logging.info("🔥 Firebase Database വിജയകരമായി കണക്ട് ആയി!")
+except Exception as e:
+    logging.error(f"❌ Firebase Connection Error: {e}")
 
 # ----------------- ADMIN CONFIG -----------------
 ADMIN_USER_ID = 7965472783
@@ -108,6 +120,17 @@ async def broadcast_to_groups(context, text):
     await asyncio.gather(*tasks, return_exceptions=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    # Firebase-ൽ User വിവരങ്ങൾ സേവ് ചെയ്യുന്നു
+    try:
+        ref = db.reference(f'users/{user.id}')
+        ref.set({
+            'name': user.full_name,
+            'username': user.username or "None"
+        })
+    except Exception as e:
+        logging.error(f"Firebase-ൽ User ഡാറ്റ നൽകുന്നതിൽ പിഴവ്: {e}")
+
     await update.message.reply_text("👋 നമസ്കാരം! ദയവായി നിങ്ങളുടെ ഫോട്ടോകൾ മാത്രം അയക്കുക.")
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,6 +162,8 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if target_user_id:
         muted_users.add(target_user_id)
+        try: db.reference(f'muted_users/{target_user_id}').set(True)
+        except: pass
     
     await update.message.reply_text(f"🔇 {user_input} വിജയകരമായി മ്യൂട്ട് ചെയ്തു!", parse_mode="HTML")
     broadcast_message = f"{user_mention} നിങ്ങളെ ഞാൻ mute ആക്കി ഇനി ഞാൻ നിങ്ങളുടെ ഒരു പോസ്റ്റും ഗ്രൂപ്പിൽ ഇടില്ല"
@@ -151,6 +176,8 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_to_unmute = int(context.args[0])
         if user_to_unmute in muted_users:
             muted_users.remove(user_to_unmute)
+            try: db.reference(f'muted_users/{user_to_unmute}').delete()
+            except: pass
             await update.message.reply_text(f"🔊 User <code>{user_to_unmute}</code> അൺ-മ്യൂട്ട് ചെയ്തിരിക്കുന്നു!", parse_mode="HTML")
         if user_to_unmute in banned_users:
             banned_users.remove(user_to_unmute)
@@ -341,6 +368,10 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
     if data.startswith("pm_mute_user_"):
         target_user_id = int(data.split("_")[3])
         muted_users.add(target_user_id)
+        
+        try: db.reference(f'muted_users/{target_user_id}').set(True)
+        except: pass
+
         await query.answer(f"⚡ User {target_user_id} തൽക്ഷണം Mute ആക്കപ്പെട്ടു!", show_alert=True)
         
         new_markup = InlineKeyboardMarkup([
@@ -358,6 +389,8 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
         target_user_id = int(data.split("_")[3])
         if target_user_id in muted_users:
             muted_users.remove(target_user_id)
+            try: db.reference(f'muted_users/{target_user_id}').delete()
+            except: pass
             
         await query.answer(f"🔊 User {target_user_id} Unmute ആക്കി!", show_alert=True)
             
@@ -394,18 +427,25 @@ async def send_photo_to_group(context, group_id, photo_file_id, group_reply_mark
 
 # ------------------ FAST FORWARD PROCESS ------------------
 async def process_photo_broadcast(context, user, photo):
+    # Firebase-ൽ ലോഗ് ഉണ്ടാക്കുന്നു
+    try:
+        db.reference('photo_logs').push({
+            'user_id': user.id,
+            'user_name': user.full_name,
+            'file_id': photo
+        })
+    except Exception as e:
+        logging.error(f"Firebase photo log error: {e}")
+
     photo_reply_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")],
         [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ])
 
-    # 🎯 ഫോട്ടോ നിങ്ങളുടെ മെയിൻ ഗ്രൂപ്പിലേക്ക് തൽക്ഷണം അയക്കുന്നു
     await send_photo_to_group(context, TARGET_GROUP_ID, photo, photo_reply_markup)
 
-    # 🔄 OFF ആണെങ്കിൽ മറ്റു ഗ്രൂപ്പുകളിൽ ഫോട്ടോ കാണില്ല, പകരം മെസ്സേജ് വരും
     if photo_forward_enabled:
-        # ON ആയിരിക്കുമ്പോൾ മറ്റ് ഗ്രൂപ്പുകളിലേക്ക് ആസിങ്ക് ആയി തൽക്ഷണം അയക്കുന്നു
         tasks = [
             send_photo_to_group(context, gid, photo, photo_reply_markup)
             for gid in list(connected_groups)
@@ -414,7 +454,6 @@ async def process_photo_broadcast(context, user, photo):
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
     else:
-        # OFF ആയിരിക്കുമ്പോൾ നോട്ടീസ് സന്ദേശം സ്പീഡിൽ അയക്കുന്നു
         other_group_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
         ])
@@ -441,7 +480,6 @@ async def process_photo_broadcast(context, user, photo):
         if notice_tasks:
             await asyncio.gather(*notice_tasks, return_exceptions=True)
 
-    # ------------------ 1087968824 PM നോട്ടിഫിക്കേഷൻ ------------------
     try:
         user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
         pm_notice_caption = f"📥 <b>New Photo Submitted</b>\n\n👤 <b>Sender:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>"
@@ -469,7 +507,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     photo = update.message.photo[-1].file_id
     
-    # ⚡ PM-ലെ മെസ്സേജ് ഉടൻ ഡിലീറ്റ് ചെയ്യുക
     try:
         await update.message.delete()
     except Exception as e:
@@ -477,7 +514,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_last_photo[user.id] = photo
 
-    # ⚡ യൂസർക്ക് താങ്ക്സ് മെസ്സേജ് സ്പോട്ടിൽ നൽകുക
     if user.id in user_last_thanks_msg:
         try: 
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=user_last_thanks_msg[user.id])
@@ -491,7 +527,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     user_last_thanks_msg[user.id] = thanks_msg.message_id
 
-    # 🚀 ഗ്രൂപ്പുകളിലേക്കും അഡ്മിനിലേക്കും ഫോർവേഡ് ചെയ്യുന്നത് പശ്ചാത്തലത്തിൽ തത്സമയം (Fastest Background Task) നടക്കും
     asyncio.create_task(process_photo_broadcast(context, user, photo))
 
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -544,7 +579,6 @@ def main():
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
     bot_app.add_handler(CommandHandler("send", send_user_photo))
 
-    # Photo ON/OFF കമാൻഡ് ഹാൻഡ്‌ലറുകൾ
     bot_app.add_handler(CommandHandler("photoon", photo_on))
     bot_app.add_handler(CommandHandler("photooff", photo_off))
 
