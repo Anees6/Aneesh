@@ -346,12 +346,17 @@ async def track_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYP
         elif update.my_chat_member.new_chat_member.status in ["member", "administrator"]:
             connected_groups.add(chat.id)
 
-# ----------------- NEW AUTO DELETE FEATURE FOR OTHER USERS -----------------
+# ----------------- AUTO DELETE FEATURE FOR USER MESSAGES -----------------
 async def auto_delete_group_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ഗ്രൂപ്പുകളിൽ മറ്റ് യൂസർമാർ അയക്കുന്ന മെസ്സേജുകൾ 5 മിനിറ്റിന് (300 sec) ശേഷം തനിയെ ഡിലീറ്റ് ആക്കുന്നു"""
+    """ഗ്രൂപ്പുകളിൽ യൂസർമാർ അയക്കുന്ന ടെക്സ്റ്റ്, ഫോട്ടോ, മീഡിയ മെസ്സേജുകൾ 5 മിനിറ്റിൽ ഡിലീറ്റ് ചെയ്യുന്നു"""
     if update.message and update.effective_chat.type in ["group", "supergroup"]:
         chat_id = update.effective_chat.id
         message_id = update.message.message_id
+        
+        # ഗ്രൂപ്പ് ആപ്പിൽ റെക്കോർഡ് ആക്കുന്നു
+        connected_groups.add(chat_id)
+        
+        # 5 മിനിറ്റിന് (300 സെക്കൻഡ്) ശേഷം ഡിലീറ്റ് ചെയ്യാനുള്ള ടാസ്ക്
         asyncio.create_task(delete_photo_after_delay(context, chat_id, message_id, 300))
 
 async def notify_muted_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -593,9 +598,9 @@ def main():
     bot_app.add_handler(CallbackQueryHandler(handle_button_clicks))
 
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
-    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
+    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.StatusUpdate.ALL, track_groups))
 
-    # ഗ്രൂപ്പിലെ മറ്റ് യൂസർമാരുടെ എല്ലാ മെസ്സേജുകളും 5 മിനിറ്റിന് ശേഷം ഡിലീറ്റ് ആക്കാൻ ചേർത്ത ഹാൻഡ്‌ലർ
+    # ഗ്രൂപ്പിൽ ആരു എന്ത് അയച്ചാലും (ALL Messages/Media) 5 മിനിറ്റിനുള്ളിൽ ഡിലീറ്റ് ആക്കാനുള്ള ഹാൻഡ്‌ലർ
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, auto_delete_group_messages))
 
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
