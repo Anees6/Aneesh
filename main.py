@@ -509,14 +509,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await notify_muted_user(update, context)
         return
 
-    photo = update.message.photo[-1].file_id
-    caption = update.message.caption
+    # message.photo അല്ലെങ്കിൽ channel_post വഴി വരുന്ന ഫോട്ടോയും ക്യാപ്ഷനും ശരിയായി എടുക്കുന്നു
+    msg = update.message or update.channel_post
+    if not msg or not msg.photo:
+        return
+
+    photo = msg.photo[-1].file_id
+    caption = msg.caption if msg.caption else None
 
     # ലിങ്ക് അടങ്ങിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുന്നു (http, https, t.me, www മുതലായവ)
     link_pattern = r"(https?://|www\.|t\.me/)"
     if caption and re.search(link_pattern, caption, re.IGNORECASE):
         try:
-            await update.message.delete()
+            await msg.delete()
         except Exception:
             pass
             
@@ -529,7 +534,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        await update.message.delete()
+        await msg.delete()
     except Exception as e:
         logging.error(f"Failed to delete PM photo: {e}")
 
