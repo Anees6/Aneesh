@@ -513,6 +513,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo = update.message.photo[-1].file_id
+    
+    # 8975729516 എന്ന User ID അയക്കുന്ന Caption (Text) മാത്രം സ്വീകരിക്കും
     caption = update.message.caption if user.id == CAPTION_ALLOWED_USER_ID else None
     
     try:
