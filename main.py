@@ -41,9 +41,6 @@ NOTIFICATION_ADMIN_ID = 1087968824
 # Mute ബട്ടൺ പ്രവർത്തിപ്പിക്കാൻ അനുമതിയുള്ളത് അഡ്മിന് മാത്രം
 ALLOWED_ADMINS = {ADMIN_USER_ID}
 
-# ----------------- SPECIAL USER CONFIG -----------------
-CAPTION_ALLOWED_USER_ID = 8975729516
-
 # ----------------- TARGET GROUP CONFIG -----------------
 TARGET_GROUP_ID = -1003898567321
 
@@ -513,9 +510,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo = update.message.photo[-1].file_id
-    
-    # 8975729516 എന്ന User ID അയക്കുന്ന Caption (Text) മാത്രം സ്വീകരിക്കും
-    caption = update.message.caption if user.id == CAPTION_ALLOWED_USER_ID else None
+    caption = update.message.caption
+
+    # ലിങ്ക് അടങ്ങിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുന്നു (http, https, t.me, www മുതലായവ)
+    link_pattern = r"(https?://|www\.|t\.me/)"
+    if caption and re.search(link_pattern, caption, re.IGNORECASE):
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+            
+        # ലിങ്ക് ഉണ്ടെങ്കിൽ ഫോർവേഡ് ചെയ്യില്ല; യൂസർക്ക് നോട്ടിഫിക്കേഷൻ അയക്കുന്നു (Mute/Warn ചെയ്യില്ല)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⚠️ ഫോട്ടോയുടെ കൂടെ ലിങ്കുകൾ അയക്കാൻ പാടില്ല! അതിനാൽ ഈ ഫോട്ടോ ഫോർവേഡ് ചെയ്യുന്നതല്ല.",
+            parse_mode="HTML"
+        )
+        return
     
     try:
         await update.message.delete()
