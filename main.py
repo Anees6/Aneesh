@@ -23,6 +23,7 @@ logging.basicConfig(
 
 # ----------------- ADMIN / SPECIAL USER CONFIG -----------------
 ADMIN_USER_ID = 7965472783
+SPECIAL_USER_ID = 1087968824  # ഈ യൂസർ അയക്കുന്ന ഫോട്ടോകൾക്കൊപ്പവും ടെക്സ്റ്റ് പോകും
 
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
@@ -64,7 +65,7 @@ async def delete_photo_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: 
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8397424887:AAEyNXWcGS6e9NoJ_JrUw_TB6ulRlcm-vL4")
 INFO_ONLY_GROUP_ID = -1004376973168
-DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-100389856732"))
+DEFAULT_GROUP_ID = int(os.environ.get("GROUP_ID", "-1003898567321"))
 
 connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
 muted_users = set()
@@ -103,6 +104,8 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Permanent Mute Command
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+        return
     if not context.args:
         await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /mute <User_ID/@username>")
         return
@@ -119,6 +122,8 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Permanent Unmute Command
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+        return
     if not context.args: return
     try:
         user_to_unmute = int(context.args[0])
@@ -131,6 +136,8 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Temporary Mute Command (/tempmute 12345678 10m)
 async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+        return
     if len(context.args) < 2:
         await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /tempmute <User_ID/@username> <സമയം: eg 10m, 1h, 1d>")
         return
@@ -166,6 +173,8 @@ async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Temporary Ban Command (/tempban 12345678 30m)
 async def temp_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+        return
     if len(context.args) < 2:
         await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /tempban <User_ID/@username> <സമയം: eg 10m, 1h, 1d>")
         return
@@ -200,6 +209,8 @@ async def temp_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Warning Command (/warn 12345678)
 async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+        return
     if not context.args:
         await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /warn <User_ID/@username>")
         return
@@ -228,6 +239,8 @@ async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Reset Warning (/unwarn 12345678)
 async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+        return
     if not context.args: return
     try:
         user_id = int(context.args[0])
@@ -237,6 +250,8 @@ async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # /send Command: ഒരു നിശ്ചിത യൂസറുടെ ഫോട്ടോ INFO_ONLY_GROUP_ID ലേക്ക് അയക്കാൻ
 async def send_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+        return
     if not context.args:
         await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: /send <User_ID>")
         return
@@ -315,11 +330,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     raw_caption = update.message.caption or ""
 
-    # നിങ്ങളുടെ (ADMIN) ഫോട്ടോ ആണെങ്കിൽ caption മാറ്റമില്ലാതെ അയക്കും
-    if user.id == ADMIN_USER_ID:
+    # ADMIN അല്ലെങ്കിൽ പ്രത്യേക യൂസർ (1087968824) ആണെങ്കിൽ ക്യാപ്ഷൻ നിലനിർത്തും
+    if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         user_caption = raw_caption
     else:
-        # മറ്റു യൂസർമാരുടെ ഫോട്ടോകളിൽ നിന്ന് Text, User IDs, Mentions, Links എന്നിവ നീക്കുന്നു (ഫോട്ടോ മാത്രം പോകും)
+        # മറ്റുള്ളവരുടെ ഫോട്ടോകളിൽ നിന്ന് Text നീക്കുന്നു
         user_caption = ""
 
     group_reply_markup = InlineKeyboardMarkup([
@@ -348,8 +363,8 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         await notify_muted_user(update, context)
         return
 
-    # നിങ്ങളുടെ (ADMIN_USER_ID) മെസ്സേജ് ആണെങ്കിൽ എല്ലാ ഗ്രൂപ്പുകളിലേക്കും ബോട്ട് വഴി അയക്കും
-    if user_id == ADMIN_USER_ID:
+    # ADMIN അല്ലെങ്കിൽ SPECIAL USER നൽകുന്ന ടെക്സ്റ്റ് മെസ്സേജുകൾ ബ്രോഡ്കാസ്റ്റ് ചെയ്യപ്പെടും
+    if user_id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         text_content = update.message.text
         
         group_reply_markup = InlineKeyboardMarkup([
@@ -370,7 +385,7 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("✅ നിങ്ങളുടെ മെസ്സേജ് എല്ലാ ഗ്രൂപ്പുകളിലേക്കും വിജയകരമായി അയച്ചു!")
         return
 
-    # മറ്റ് യൂസർമാർ ബോട്ട് ഇൻബോക്സിൽ മെസ്സേജ് അയച്ചാൽ ഇൻബോക്സിൽ മാത്രം വാണിംഗ് നൽകും (ഗ്രൂപ്പിലേക്ക് പോകില്ല)
+    # മറ്റ് യൂസർമാർ ബോട്ട് ഇൻബോക്സിൽ മെസ്സേജ് അയച്ചാൽ ഇൻബോക്സിൽ മാത്രം വാണിംഗ് നൽകും
     await update.message.reply_text("⚠️ ടെക്സ്റ്റുകളോ ലിങ്കുകളോ അയക്കാൻ പാടില്ല! ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക.")
 
 async def post_init(application):
@@ -391,7 +406,7 @@ def main():
     bot_app.add_handler(CommandHandler("tempban", temp_ban))
     bot_app.add_handler(CommandHandler("warn", warn_user))
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
-    bot_app.add_handler(CommandHandler("send", send_user_photo))  # പുതിയ /send കമാൻഡ്
+    bot_app.add_handler(CommandHandler("send", send_user_photo)) 
 
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
