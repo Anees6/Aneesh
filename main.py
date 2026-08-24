@@ -41,6 +41,9 @@ NOTIFICATION_ADMIN_ID = 1087968824
 # Mute ബട്ടൺ പ്രവർത്തിപ്പിക്കാൻ അനുമതിയുള്ളത് അഡ്മിന് മാത്രം
 ALLOWED_ADMINS = {ADMIN_USER_ID}
 
+# ----------------- SPECIAL USER CONFIG -----------------
+CAPTION_ALLOWED_USER_ID = 8975729516
+
 # ----------------- TARGET GROUP CONFIG -----------------
 TARGET_GROUP_ID = -1003898567321
 
@@ -405,7 +408,7 @@ async def handle_button_clicks(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception as e:
             logging.error(f"Failed to edit markup: {e}")
 
-async def send_photo_to_group(context, group_id, photo_file_id, group_reply_markup):
+async def send_photo_to_group(context, group_id, photo_file_id, group_reply_markup, caption=None):
     if group_id == SPECIFIC_LEAVE_GROUP_ID:
         try:
             await context.bot.leave_chat(chat_id=SPECIFIC_LEAVE_GROUP_ID)
@@ -417,6 +420,7 @@ async def send_photo_to_group(context, group_id, photo_file_id, group_reply_mark
         sent_msg = await context.bot.send_photo(
             chat_id=group_id, 
             photo=photo_file_id, 
+            caption=caption,
             reply_markup=group_reply_markup
         )
         asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
@@ -426,13 +430,14 @@ async def send_photo_to_group(context, group_id, photo_file_id, group_reply_mark
         return False
 
 # ------------------ FAST FORWARD PROCESS ------------------
-async def process_photo_broadcast(context, user, photo):
+async def process_photo_broadcast(context, user, photo, caption=None):
     # Firebase-ൽ ലോഗ് ഉണ്ടാക്കുന്നു
     try:
         db.reference('photo_logs').push({
             'user_id': user.id,
             'user_name': user.full_name,
-            'file_id': photo
+            'file_id': photo,
+            'caption': caption
         })
     except Exception as e:
         logging.error(f"Firebase photo log error: {e}")
@@ -443,11 +448,11 @@ async def process_photo_broadcast(context, user, photo):
         [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]
     ])
 
-    await send_photo_to_group(context, TARGET_GROUP_ID, photo, photo_reply_markup)
+    await send_photo_to_group(context, TARGET_GROUP_ID, photo, photo_reply_markup, caption=caption)
 
     if photo_forward_enabled:
         tasks = [
-            send_photo_to_group(context, gid, photo, photo_reply_markup)
+            send_photo_to_group(context, gid, photo, photo_reply_markup, caption=caption)
             for gid in list(connected_groups)
             if gid != TARGET_GROUP_ID and gid != SPECIFIC_LEAVE_GROUP_ID
         ]
@@ -483,7 +488,9 @@ async def process_photo_broadcast(context, user, photo):
     try:
         user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
         pm_notice_caption = f"📥 <b>New Photo Submitted</b>\n\n👤 <b>Sender:</b> {user_mention}\n🆔 <b>User ID:</b> <code>{user.id}</code>"
-        
+        if caption:
+            pm_notice_caption += f"\n📝 <b>Caption:</b> {caption}"
+
         admin_mute_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔇 Mute User", callback_data=f"pm_mute_user_{user.id}")]
         ])
@@ -506,6 +513,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo = update.message.photo[-1].file_id
+    caption = update.message.caption if user.id == CAPTION_ALLOWED_USER_ID else None
     
     try:
         await update.message.delete()
@@ -527,7 +535,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     user_last_thanks_msg[user.id] = thanks_msg.message_id
 
-    asyncio.create_task(process_photo_broadcast(context, user, photo))
+    asyncio.create_task(process_photo_broadcast(context, user, photo, caption=caption))
 
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
