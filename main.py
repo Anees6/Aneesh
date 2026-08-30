@@ -354,7 +354,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         thanks_msg = await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]]))
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
-# Text/Link കൈകാര്യം ചെയ്യുന്ന ഫങ്ഷൻ
+# Text/Link കൈകാര്യം ചെയ്യുന്ന ഫങ്ഷൻ (Inbox-ൽ വരുന്നവ)
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -388,6 +388,22 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     # മറ്റ് യൂസർമാർ ബോട്ട് ഇൻബോക്സിൽ മെസ്സേജ് അയച്ചാൽ ഇൻബോക്സിൽ മാത്രം വാണിംഗ് നൽകും
     await update.message.reply_text("⚠️ ടെക്സ്റ്റുകളോ ലിങ്കുകളോ അയക്കാൻ പാടില്ല! ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക.")
 
+# --- ഗ്രൂപ്പിലെ മെസ്സേജുകൾ നോക്കുന്ന പുതിയ ഫങ്ഷൻ ---
+async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
+    text_content = update.message.text
+    line_count = len(text_content.splitlines())
+    has_entities = bool(update.message.entities)
+
+    # 6 വരിയിൽ കൂടുതലോ അല്ലെങ്കിൽ വേറെ ടെക്സ്റ്റ് സ്റ്റൈലുകൾ ഉണ്ടെങ്കിലോ ഗ്രൂപ്പിൽ നിന്നും ഡിലീറ്റ് ചെയ്യും
+    if line_count > 6 or has_entities:
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logging.error(f"Failed to delete group message: {e}")
+
 async def post_init(application):
     asyncio.create_task(self_ping())
 
@@ -409,6 +425,7 @@ def main():
     bot_app.add_handler(CommandHandler("send", send_user_photo)) 
 
     bot_app.add_handler(ChatMemberHandler(track_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, handle_group_text))
     bot_app.add_handler(MessageHandler(filters.ChatType.GROUPS, track_groups))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.PHOTO & ~filters.COMMAND, handle_text_or_link))
