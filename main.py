@@ -100,12 +100,12 @@ async def broadcast_to_groups(context, text):
 
 # Mute ചെയ്യുമ്പോൾ യൂസറുടെ ഫോട്ടോകൾ ഡിലീറ്റ് ചെയ്യാനും ഗ്രൂപ്പിൽ അറിയിക്കാനും
 async def delete_user_photos_and_notify(context, target_user_id, duration_str=None):
-    if target_user_id in sent_user_photos:
-        for cid, mid in sent_user_photos[target_user_id]:
+    if target_user_id in sent_user_photos and sent_user_photos[target_user_id]:
+        for cid, mid in list(sent_user_photos[target_user_id]):
             try:
                 await context.bot.delete_message(chat_id=cid, message_id=mid)
             except Exception as e:
-                logging.error(f"Failed to delete photo message on mute: {e}")
+                logging.error(f"Failed to delete photo message {mid} in {cid} on mute: {e}")
         sent_user_photos[target_user_id] = []
 
     user_mention = f"<a href='tg://user?id={target_user_id}'>User {target_user_id}</a>"
@@ -354,6 +354,7 @@ async def send_to_single_group(context, group_id, photo, user, user_caption, gro
             sent_msg = await context.bot.send_photo(chat_id=group_id, photo=photo, caption=user_caption, reply_markup=group_reply_markup)
             asyncio.create_task(delete_photo_after_delay(context, group_id, sent_msg.message_id, 300))
         
+        # ഫോട്ടോ മെസ്സേജ് ട്രാക്കിംഗ് ഐഡി കൃത്യമായി സേവ് ചെയ്യുന്നു
         if user.id not in sent_user_photos:
             sent_user_photos[user.id] = []
         sent_user_photos[user.id].append((group_id, sent_msg.message_id))
