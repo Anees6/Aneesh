@@ -120,7 +120,7 @@ async def delete_user_photos_and_notify(context, target_user_id, duration_str=No
 def get_post_keyboard(user_id: int):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🕵️ Anonymously Post", url="https://t.me/Faseena5bot")], 
-        [InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")],
+        [InlineKeyboardButton("ചേച്ചിമാർ", url="https://t.me/+3cAADCEu9Mw1Y2M9")],
         [InlineKeyboardButton("🚫 Mute User (Admin Only)", callback_data=f"mute_{user_id}")]
     ])
 
@@ -391,7 +391,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: pass
 
     if sent_success:
-        thanks_msg = await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("മല്ലു ചാറ്റ്", url="https://t.me/+-KKPdBquED1lOTZl")]]))
+        thanks_msg = await update.message.reply_text("✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ചേച്ചിമാർ", url="https://t.me/+3cAADCEu9Mw1Y2M9")]]))
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
 # Text/Link കൈകാര്യം ചെയ്യുന്ന ഫങ്ഷൻ (Inbox-ൽ വരുന്നവ)
