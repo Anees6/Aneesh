@@ -181,7 +181,7 @@ def get_post_keyboard(user_id: int):
         ],
         [
             InlineKeyboardButton(
-                "ചേച്ചിമാരുടെ ലോകം",
+                "ഗ്രൂപ്പ്‌",
                 url="https://t.me/+3cAADCEu9Mw1Y2M9"
             )
         ],
@@ -733,7 +733,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "ചേച്ചിമാരുടെ ലോകം",
+                        "ഗ്രൂപ്പ്‌",
                         url="https://t.me/+3cAADCEu9Mw1Y2M9"
                     )
                 ]
