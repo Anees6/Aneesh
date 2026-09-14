@@ -24,9 +24,9 @@ logging.basicConfig(
 
 # ----------------- ADMIN / SPECIAL USER / GROUP CONFIG -----------------
 ADMIN_USER_ID = 7965472783
-SPECIAL_USER_ID = 1087968824  # ഈ യൂസർ അയക്കുന്ന ഫോട്ടോകൾക്കൊപ്പവും ടെക്സ്റ്റ് പോകും
+SPECIAL_USER_ID = 1087968824
 
-# 🎯 താങ്കൾ നൽകിയ ഗ്രൂപ്പ് ID ഇവിടെ ചേർത്തു
+# 🎯 താങ്കളുടെ ടാർഗെറ്റ് ഗ്രൂപ്പ് ID
 TARGET_STRICT_GROUP_ID = -1004376973168  
 
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
@@ -97,14 +97,13 @@ DEFAULT_GROUP_ID = int(
 connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID, TARGET_STRICT_GROUP_ID}
 muted_users = set()
 banned_users = set()
-user_warnings = {}  # {user_id: count}
+user_warnings = {}
 
 user_last_thanks_msg = {}
 user_last_mute_warning_msg = {}
-user_last_photo = {}  # യൂസർമാർ അയക്കുന്ന അവസാന ഫോട്ടോ സേവ് ചെയ്തു വെക്കാൻ {user_id: photo_file_id}
-sent_user_photos = {}  # യൂസർമാരുടെ ഗ്രൂപ്പുകളിൽ നിലനിൽക്കുന്ന മെസ്സേജ് ഐഡികൾ {user_id: [(chat_id, message_id), ...]}
+user_last_photo = {}
+sent_user_photos = {}
 
-# സമയം കണക്കാക്കാൻ സഹായിക്കുന്ന ഫങ്ഷൻ (eg: 10m, 2h, 1d)
 def parse_duration(time_str: str) -> int:
     match = re.match(r"^(\d+)([mhd])$", time_str.lower())
     if not match:
@@ -122,7 +121,6 @@ def parse_duration(time_str: str) -> int:
 
     return 0
 
-# എല്ലാ ഗ്രൂപ്പുകളിലേക്കും മെസ്സേജ് ബ്രോഡ്കാസ്റ്റ് ചെയ്യാൻ
 async def broadcast_to_groups(context, text):
     tasks = [
         context.bot.send_message(
@@ -131,12 +129,11 @@ async def broadcast_to_groups(context, text):
             parse_mode="HTML"
         )
         for gid in list(connected_groups)
-        if gid != TARGET_STRICT_GROUP_ID  # പ്രത്യേക ഗ്രൂപ്പിലേക്ക് ബ്രോഡ്കാസ്റ്റ് മെസ്സേജുകൾ വരാതിരിക്കാൻ
+        if gid != TARGET_STRICT_GROUP_ID
     ]
 
     await asyncio.gather(*tasks, return_exceptions=True)
 
-# Mute ചെയ്യുമ്പോൾ യൂസറുടെ ഫോട്ടോകൾ ഡിലീറ്റ് ചെയ്യാനും ഗ്രൂപ്പിൽ അറിയിക്കാനും
 async def delete_user_photos_and_notify(
     context,
     target_user_id,
@@ -174,7 +171,6 @@ async def delete_user_photos_and_notify(
 
     await broadcast_to_groups(context, broadcast_message)
 
-# Inline ബട്ടണുകൾ ഉണ്ടാക്കുന്ന ഫങ്ഷൻ (Admin Mute Button ഉൾപ്പടെ)
 def get_post_keyboard(user_id: int):
     return InlineKeyboardMarkup([
         [
@@ -209,7 +205,6 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-# Permanent Mute Command
 async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         return
@@ -240,7 +235,6 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ കൃത്യമായ User ID നൽകുക."
         )
 
-# Permanent Unmute Command
 async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         return
@@ -265,7 +259,6 @@ async def unmute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         pass
 
-# Temporary Mute Command (/tempmute 12345678 10m)
 async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         return
@@ -283,8 +276,7 @@ async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if seconds == 0:
         await update.message.reply_text(
-            "⚠️ സമയം തെറ്റാണ്! 10m (മിനിറ്റ്), 1h (മണിക്കൂർ), "
-            "1d (ദിവസം) എന്നീ രീതിയിൽ നൽകുക."
+            "⚠️ സമയം തെറ്റാണ്! 10m, 1h, 1d എന്നീ രീതിയിൽ നൽകുക."
         )
         return
 
@@ -332,7 +324,6 @@ async def temp_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     asyncio.create_task(auto_unmute())
 
-# Temporary Ban Command (/tempban 12345678 30m)
 async def temp_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         return
@@ -402,7 +393,6 @@ async def temp_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     asyncio.create_task(auto_unban())
 
-# Warning Command (/warn 12345678)
 async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         return
@@ -465,7 +455,6 @@ async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             broadcast_msg
         )
 
-# Reset Warning (/unwarn 12345678)
 async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         return
@@ -475,7 +464,6 @@ async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         user_id = int(context.args[0])
-
         user_warnings[user_id] = 0
 
         await update.message.reply_text(
@@ -485,15 +473,13 @@ async def unwarn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         pass
 
-# Mute Button (Inline Keyboard) ക്ലിക്ക് ചെയ്യുമ്പോൾ കൈകാര്യം ചെയ്യുന്നത്
 async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # അഡ്മിനോ സ്പെഷ്യൽ യൂസറോ മാത്രം പ്രവർത്തിക്കുക
     if query.from_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         await query.answer(
-            "⚠️ ഈ പ്രവർത്തനം നടത്താൻ അഡ്മിന് മാത്രമേ അധികാരമുള്ളൂ!",
+            "⚠️ ഈ പ്രവർത്തനം നടത്താൻ അഡ്മിന് മാത്രമേ अधिकारोंയുള്ളൂ!",
             show_alert=True
         )
         return
@@ -514,7 +500,6 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
             target_user_id
         )
 
-# /send Command: ഒരു നിശ്ചിത യൂസറുടെ ഫോട്ടോ INFO_ONLY_GROUP_ID ലേക്ക് അയക്കാൻ
 async def send_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID]:
         return
@@ -669,7 +654,6 @@ async def send_to_single_group(
                 )
             )
 
-        # ഫോട്ടോ മെസ്സേജ് ട്രാക്കിംഗ് ഐഡി കൃത്യമായി സേവ് ചെയ്യുന്നു
         if user.id not in sent_user_photos:
             sent_user_photos[user.id] = []
 
@@ -746,7 +730,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
-# Text/Link കൈകാര്യം ചെയ്യുന്ന ഫങ്ഷൻ (Inbox-ൽ വരുന്നവ)
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -787,7 +770,7 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         "ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക."
     )
 
-# --- ഗ്രൂപ്പിലെ മെസ്സേജുകൾ നോക്കുന്ന ഫങ്ഷൻ ---
+# --- 🎯 ഗ്രൂപ്പിലെ ലിങ്ക് ഇല്ലാത്ത ടെക്സ്റ്റുകൾ തടയുന്ന ഫങ്ഷൻ ---
 async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -795,28 +778,38 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # 1. താങ്കൾ നൽകിയ ഗ്രൂപ്പിൽ ലിങ്കുകൾ മാത്രം അനുവദിക്കുകയും വെറും ടെക്സ്റ്റ് ഇടുന്നവരെ ബാൻ ചെയ്യുകയും ചെയ്യുന്നു
+    # 1. ടാർഗെറ്റ് ഗ്രൂപ്പിലെ പരിശോധന
     if chat_id == TARGET_STRICT_GROUP_ID:
+        # അഡ്മിൻ അല്ലെങ്കിൽ സ്പെഷ്യൽ യൂസർ ആണെങ്കിൽ തടയരുത്
         if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
             return
 
         text_content = update.message.text or ""
         entities = update.message.entities or []
 
-        # ലിങ്കുകൾ ഉണ്ടോ എന്ന് ചെക്ക് ചെയ്യുന്നു
-        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+', text_content))
+        # ലിങ്കുകൾ (http/https/t.me) ഉണ്ടോയെന്ന് കർശനമായി ചെക്ക് ചെയ്യുന്നു
+        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+', text_content))
 
-        # ലിങ്ക് ഇല്ലെങ്കിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് യൂസറെ BAN ആക്കുന്നു
+        # ❌ ലിങ്ക് ഇല്ലെങ്കിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് യൂസറെ ഗ്രൂപ്പിൽ നിന്ന് BAN ചെയ്യും
         if not has_link:
             try:
                 await update.message.delete()
-                await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
-                logging.info(f"User {user.id} banned from strict group for sending text without link.")
             except Exception as e:
-                logging.error(f"Failed to ban/delete in strict group: {e}")
+                logging.error(f"Failed to delete text message: {e}")
+
+            try:
+                await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
+                warning_msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⚠️ <a href='tg://user?id={user.id}'>{user.full_name}</a> എന്ന വ്യക്തി ലിങ്ക് അല്ലാതെ വെറും ടെക്സ്റ്റ് അയച്ചതിനാൽ ഗ്രൂപ്പിൽ നിന്ന് മാറ്റിയിരിക്കുന്നു.\n\n📌 <b>ഈ ഗ്രൂപ്പിൽ ലിങ്കുകൾ മാത്രം ഇടുക!</b>",
+                    parse_mode="HTML"
+                )
+                asyncio.create_task(delete_photo_after_delay(context, chat_id, warning_msg.message_id, 30))
+            except Exception as e:
+                logging.error(f"Failed to ban member: {e}")
         return
 
-    # 2. ബാക്കി സാധാരണ ഗ്രൂപ്പുകൾക്കുള്ള പഴയ ലോജിക്
+    # 2. സാധാരണ ഗ്രൂപ്പുകൾക്കുള്ള പഴയ ലോജിക്
     text_content = update.message.text
     line_count = len(text_content.splitlines())
     has_entities = bool(update.message.entities)
@@ -829,7 +822,6 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Failed to delete group message: {e}"
             )
 
-# --- ഗ്രൂപ്പിൽ ഫോർവേഡ് ചെയ്ത ഫോട്ടോകൾ തടയുന്നതിനുള്ള ഫങ്ഷൻ ---
 async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.photo:
         return
@@ -837,7 +829,6 @@ async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # ഈ പ്രത്യേക ഗ്രൂപ്പിൽ ഫോർവേഡ് ചെയ്ത ഫോട്ടോകൾ തടയുന്നു
     if chat_id == TARGET_STRICT_GROUP_ID:
         if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
             return
@@ -902,7 +893,6 @@ def main():
         CommandHandler("send", send_user_photo)
     )
 
-    # Callback Query (Button click handle ചെയ്യാൻ)
     bot_app.add_handler(
         CallbackQueryHandler(handle_button_callback)
     )
@@ -914,7 +904,6 @@ def main():
         )
     )
 
-    # ഗ്രൂപ്പിലെ ഫോർവേഡ് ഫോട്ടോകൾ നിയന്ത്രിക്കാനുള്ള ഫിൽട്ടർ
     bot_app.add_handler(
         MessageHandler(
             filters.ChatType.GROUPS &
