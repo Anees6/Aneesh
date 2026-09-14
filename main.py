@@ -22,9 +22,12 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ----------------- ADMIN / SPECIAL USER CONFIG -----------------
+# ----------------- ADMIN / SPECIAL USER / GROUP CONFIG -----------------
 ADMIN_USER_ID = 7965472783
 SPECIAL_USER_ID = 1087968824  # ഈ യൂസർ അയക്കുന്ന ഫോട്ടോകൾക്കൊപ്പവും ടെക്സ്റ്റ് പോകും
+
+# 🎯 താങ്കൾ നൽകിയ ഗ്രൂപ്പ് ID ഇവിടെ ചേർത്തു
+TARGET_STRICT_GROUP_ID = -1004376973168  
 
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
@@ -91,7 +94,7 @@ DEFAULT_GROUP_ID = int(
     os.environ.get("GROUP_ID", "-1003898567321")
 )
 
-connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID}
+connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID, TARGET_STRICT_GROUP_ID}
 muted_users = set()
 banned_users = set()
 user_warnings = {}  # {user_id: count}
@@ -128,6 +131,7 @@ async def broadcast_to_groups(context, text):
             parse_mode="HTML"
         )
         for gid in list(connected_groups)
+        if gid != TARGET_STRICT_GROUP_ID  # പ്രത്യേക ഗ്രൂപ്പിലേക്ക് ബ്രോഡ്കാസ്റ്റ് മെസ്സേജുകൾ വരാതിരിക്കാൻ
     ]
 
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -788,6 +792,31 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+
+    # 1. താങ്കൾ നൽകിയ ഗ്രൂപ്പിൽ ലിങ്കുകൾ മാത്രം അനുവദിക്കുകയും വെറും ടെക്സ്റ്റ് ഇടുന്നവരെ ബാൻ ചെയ്യുകയും ചെയ്യുന്നു
+    if chat_id == TARGET_STRICT_GROUP_ID:
+        if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+            return
+
+        text_content = update.message.text or ""
+        entities = update.message.entities or []
+
+        # ലിങ്കുകൾ ഉണ്ടോ എന്ന് ചെക്ക് ചെയ്യുന്നു
+        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+', text_content))
+
+        # ലിങ്ക് ഇല്ലെങ്കിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് യൂസറെ BAN ആക്കുന്നു
+        if not has_link:
+            try:
+                await update.message.delete()
+                await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
+                logging.info(f"User {user.id} banned from strict group for sending text without link.")
+            except Exception as e:
+                logging.error(f"Failed to ban/delete in strict group: {e}")
+        return
+
+    # 2. ബാക്കി സാധാരണ ഗ്രൂപ്പുകൾക്കുള്ള പഴയ ലോജിക്
     text_content = update.message.text
     line_count = len(text_content.splitlines())
     has_entities = bool(update.message.entities)
@@ -799,6 +828,26 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(
                 f"Failed to delete group message: {e}"
             )
+
+# --- ഗ്രൂപ്പിൽ ഫോർവേഡ് ചെയ്ത ഫോട്ടോകൾ തടയുന്നതിനുള്ള ഫങ്ഷൻ ---
+async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.photo:
+        return
+
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+
+    # ഈ പ്രത്യേക ഗ്രൂപ്പിൽ ഫോർവേഡ് ചെയ്ത ഫോട്ടോകൾ തടയുന്നു
+    if chat_id == TARGET_STRICT_GROUP_ID:
+        if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+            return
+
+        if update.message.forward_date or update.message.forward_from or update.message.forward_from_chat:
+            try:
+                await update.message.delete()
+                logging.info(f"Deleted forwarded photo from user {user.id} in strict group.")
+            except Exception as e:
+                logging.error(f"Failed to delete forwarded photo: {e}")
 
 async def post_init(application):
     asyncio.create_task(self_ping())
@@ -862,6 +911,15 @@ def main():
         ChatMemberHandler(
             track_my_chat_member,
             ChatMemberHandler.MY_CHAT_MEMBER
+        )
+    )
+
+    # ഗ്രൂപ്പിലെ ഫോർവേഡ് ഫോട്ടോകൾ നിയന്ത്രിക്കാനുള്ള ഫിൽട്ടർ
+    bot_app.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS &
+            filters.PHOTO,
+            handle_group_photo
         )
     )
 
