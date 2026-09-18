@@ -196,29 +196,33 @@ def get_post_keyboard(user_id: int):
         ]
     ])
 
-# --- 🎯 NEW: COMMAND HANDLERS FOR LINK FILTER ---
-async def link_on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- 🎯 UPDATED /link COMMAND HANDLER ---
+async def link_toggle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
-    
-    # Check if user is admin/special user or group admin
+
+    # അഡ്മിൻ പെർമിഷൻ പരിശോധിക്കുന്നു
     user_status = await context.bot.get_chat_member(chat_id, user.id)
-    if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
+    is_admin = user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']
+
+    if not is_admin:
+        await update.message.reply_text("❌ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിൻ പെർമിഷൻ വേണം.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: `/link on` അല്ലെങ്കിൽ `/link off`", parse_mode="Markdown")
+        return
+
+    option = context.args[0].lower().strip()
+
+    if option == "on":
         link_filter_status[chat_id] = True
         await update.message.reply_text("✅ ഈ ഗ്രൂപ്പിൽ Link-Only ഫിൽട്ടർ ഓണാക്കിയിരിക്കുന്നു! ഇനി ലിങ്കുകൾ ഉള്ള മെസ്സേജ് മാത്രം അനുവദിക്കും.")
-    else:
-        await update.message.reply_text("❌ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിൻ പെർമിഷൻ വേണം.")
-
-async def link_off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    
-    user_status = await context.bot.get_chat_member(chat_id, user.id)
-    if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
+    elif option == "off":
         link_filter_status[chat_id] = False
         await update.message.reply_text("🚫 Link-Only ഫിൽട്ടർ ഓഫാക്കിയിരിക്കുന്നു.")
     else:
-        await update.message.reply_text("❌ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിൻ പെർമിഷൻ വേണം.")
+        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: `/link on` അല്ലെങ്കിൽ `/link off`", parse_mode="Markdown")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -797,7 +801,7 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         "ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക."
     )
 
-# --- 🎯 UPDATED: ഗ്രൂപ്പിലെ ലിങ്ക് അല്ലാത്ത മെസ്സേജുകൾ തടയുന്ന ഫങ്ഷൻ ---
+# --- 🎯 ഗ്രൂപ്പിലെ ലിങ്ക് അല്ലാത്ത മെസ്സേജുകൾ തടയുന്ന ഫങ്ഷൻ ---
 async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -924,13 +928,9 @@ def main():
         CommandHandler("send", send_user_photo)
     )
 
-    # 🎯 NEW LINK COMMAND HANDLERS
+    # 🎯 Single CommandHandler for /link on and /link off
     bot_app.add_handler(
-        CommandHandler("link", link_on_cmd, filters=filters.Regex(r'^(?i)/link\s+on$'))
-    )
-    
-    bot_app.add_handler(
-        CommandHandler("link", link_off_cmd, filters=filters.Regex(r'^(?i)/link\s+off$'))
+        CommandHandler("link", link_toggle_cmd)
     )
 
     bot_app.add_handler(
