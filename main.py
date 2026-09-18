@@ -25,9 +25,12 @@ logging.basicConfig(
 # ----------------- ADMIN / SPECIAL USER / GROUP CONFIG -----------------
 ADMIN_USER_ID = 7965472783
 SPECIAL_USER_ID = 1087968824
-ALLOWED_TEXT_USER_ID = 8975729516  # Text ഫൊർവേഡ് ചെയ്യാൻ അനുവദിച്ചിരിക്കുന്ന യൂസർ ID
+ALLOWED_TEXT_USER_ID = 8975729516  
 
 TARGET_STRICT_GROUP_ID = -1004376973168  
+
+# 🎯 താങ്കൾ നൽകിയ പുതിയ ഗ്രൂപ്പ് ID:
+SPECIAL_STRICT_GROUP_ID = -1004313629331  
 
 # ഗ്രൂപ്പുകളിലെ /link status ഓർത്തു വെക്കാൻ
 link_filter_status = {}
@@ -97,7 +100,7 @@ DEFAULT_GROUP_ID = int(
     os.environ.get("GROUP_ID", "-1003898567321")
 )
 
-connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID, TARGET_STRICT_GROUP_ID}
+connected_groups = {INFO_ONLY_GROUP_ID, DEFAULT_GROUP_ID, TARGET_STRICT_GROUP_ID, SPECIAL_STRICT_GROUP_ID}
 muted_users = set()
 banned_users = set()
 user_warnings = {}
@@ -132,7 +135,7 @@ async def broadcast_to_groups(context, text):
             parse_mode="HTML"
         )
         for gid in list(connected_groups)
-        if gid != TARGET_STRICT_GROUP_ID
+        if gid not in [TARGET_STRICT_GROUP_ID, SPECIAL_STRICT_GROUP_ID]
     ]
 
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -190,7 +193,6 @@ def get_post_keyboard(user_id: int):
         ]
     ])
 
-# --- 🎯 UPDATED /link COMMAND HANDLER ---
 async def link_toggle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
@@ -746,7 +748,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
-# --- 🎯 UPDATED TEXT FORWARDING LOGIC ---
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -758,7 +759,6 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    # അഡ്മിൻമാർ അല്ലെങ്കിൽ പ്രത്യേകം അനുവദിച്ച USER_ID (8975729516) അയച്ച ടെക്സ്റ്റ് മാത്രം ഫോർവേഡ് ചെയ്യും
     if user_id in [ADMIN_USER_ID, SPECIAL_USER_ID, ALLOWED_TEXT_USER_ID]:
         text_content = update.message.text
         group_reply_markup = get_post_keyboard(user_id)
@@ -783,13 +783,12 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    # മറ്റ് ഉപയോക്താക്കൾ ടെക്സ്റ്റ് അയച്ചാൽ ഗ്രൂപ്പിൽ പോകില്ല
     await update.message.reply_text(
         "⚠️ ടെക്സ്റ്റുകളോ ലിങ്കുകളോ അയക്കാൻ പാടില്ല! "
         "ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക."
     )
 
-# --- 🎯 ഗ്രൂപ്പിലെ ലിങ്ക് അല്ലാത്ത മെസ്സേജുകൾ തടയുന്ന ഫങ്ഷൻ ---
+# --- 🎯 ഗ്രൂപ്പ് ടെക്സ്റ്റ് & ലിങ്ക് ഫിൽട്ടർ ലോജിക് ---
 async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -797,20 +796,47 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # അഡ്മിൻമാർക്ക് ആക്ഷൻ എടുക്കരുത്
+    # അഡ്മിൻമാർക്ക് ബാധകമല്ല
     user_status = await context.bot.get_chat_member(chat_id, user.id)
     if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
         return
 
-    # 1. /link on ആണോ അല്ലെങ്കിൽ TARGET_STRICT_GROUP_ID ആണോ എന്ന് ചെക്ക് ചെയ്യുന്നു
+    # 🎯 1. പ്രത്യേക ഗ്രൂപ്പ് (SPECIAL_STRICT_GROUP_ID) ഫിൽട്ടർ (-1004313629331)
+    if chat_id == SPECIAL_STRICT_GROUP_ID:
+        text_content = update.message.text or ""
+        entities = update.message.entities or []
+
+        # ലിങ്ക് ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
+        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
+        
+        # ഫോർവേഡ് ചെയ്ത മെസ്സേജ് ആണോ എന്ന് പരിശോധിക്കുന്നു
+        is_forwarded = bool(update.message.forward_date or update.message.forward_from or update.message.forward_from_chat)
+
+        # ❌ ലിങ്ക് ഇല്ലെങ്കിലോ ഫോർവേഡ് മെസ്സേജ് ആണെങ്കിലോ സ്പോട്ടിൽ ഡിലീറ്റ് ചെയ്ത് വാണിംഗ് നൽകും
+        if not has_link or is_forwarded:
+            async def process_strict_violation():
+                try:
+                    await update.message.delete()
+                    user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+                    warn_msg = await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ <b>Link</b> മാത്രം ഇടുക! ഫോർവേഡ് ചെയ്ത മെസ്സേജുകളോ മറ്റ് ടെക്സ്റ്റുകളോ അനുവദിക്കില്ല.",
+                        parse_mode="HTML"
+                    )
+                    await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
+                except Exception as e:
+                    logging.error(f"Error in SPECIAL_STRICT_GROUP_ID: {e}")
+
+            asyncio.create_task(process_strict_violation())
+        return
+
+    # 2. സാധാരണ /link on അല്ലെങ്കിൽ TARGET_STRICT_GROUP_ID ലോജിക്
     if link_filter_status.get(chat_id, False) or chat_id == TARGET_STRICT_GROUP_ID:
         text_content = update.message.text or ""
         entities = update.message.entities or []
 
-        # ലിങ്കുകൾ ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
         has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
 
-        # ❌ ലിങ്ക് ഇല്ലെങ്കിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്യും
         if not has_link:
             try:
                 await update.message.delete()
@@ -818,7 +844,7 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logging.error(f"Failed to delete text message: {e}")
         return
 
-    # 2. ഫിൽട്ടർ ഓഫാക്കുമ്പോൾ ഉള്ള സാധാരണ ഗ്രൂപ്പ് ലോജിക്
+    # 3. സാധാരണ ഗ്രൂപ്പ് ലോജിക്
     text_content = update.message.text
     line_count = len(text_content.splitlines())
     has_entities = bool(update.message.entities)
@@ -827,9 +853,7 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await update.message.delete()
         except Exception as e:
-            logging.error(
-                f"Failed to delete group message: {e}"
-            )
+            logging.error(f"Failed to delete group message: {e}")
 
 async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.photo:
@@ -837,6 +861,28 @@ async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     chat_id = update.effective_chat.id
     user = update.effective_user
+
+    # 🎯 SPECIAL_STRICT_GROUP_ID-ൽ ഫോട്ടോകൾ സ്പോട്ടിൽ ഡിലീറ്റ് ചെയ്യുന്നു
+    if chat_id == SPECIAL_STRICT_GROUP_ID:
+        user_status = await context.bot.get_chat_member(chat_id, user.id)
+        if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
+            return
+
+        async def process_photo_violation():
+            try:
+                await update.message.delete()
+                user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+                warn_msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ <b>Link</b> മാത്രം ഇടുക!",
+                    parse_mode="HTML"
+                )
+                await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
+            except Exception as e:
+                logging.error(f"Failed to delete photo in SPECIAL_STRICT_GROUP_ID: {e}")
+
+        asyncio.create_task(process_photo_violation())
+        return
 
     if chat_id == TARGET_STRICT_GROUP_ID:
         if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
@@ -866,49 +912,18 @@ def main():
         .build()
     )
 
-    bot_app.add_handler(
-        CommandHandler("start", start)
-    )
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("id", get_id))
+    bot_app.add_handler(CommandHandler("mute", mute_user))
+    bot_app.add_handler(CommandHandler("unmute", unmute_user))
+    bot_app.add_handler(CommandHandler("tempmute", temp_mute))
+    bot_app.add_handler(CommandHandler("tempban", temp_ban))
+    bot_app.add_handler(CommandHandler("warn", warn_user))
+    bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
+    bot_app.add_handler(CommandHandler("send", send_user_photo))
+    bot_app.add_handler(CommandHandler("link", link_toggle_cmd))
 
-    bot_app.add_handler(
-        CommandHandler("id", get_id)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("mute", mute_user)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("unmute", unmute_user)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("tempmute", temp_mute)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("tempban", temp_ban)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("warn", warn_user)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("unwarn", unwarn_user)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("send", send_user_photo)
-    )
-
-    bot_app.add_handler(
-        CommandHandler("link", link_toggle_cmd)
-    )
-
-    bot_app.add_handler(
-        CallbackQueryHandler(handle_button_callback)
-    )
+    bot_app.add_handler(CallbackQueryHandler(handle_button_callback))
 
     bot_app.add_handler(
         ChatMemberHandler(
@@ -957,9 +972,7 @@ def main():
         )
     )
 
-    bot_app.run_polling(
-        drop_pending_updates=True
-    )
+    bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
