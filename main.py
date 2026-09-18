@@ -26,7 +26,6 @@ logging.basicConfig(
 ADMIN_USER_ID = 7965472783
 SPECIAL_USER_ID = 1087968824
 
-# 🎯 താങ്കളുടെ ടാർഗെറ്റ് ഗ്രൂപ്പ് ID
 TARGET_STRICT_GROUP_ID = -1004376973168  
 
 # ഗ്രൂപ്പുകളിലെ /link status ഓർത്തു വെക്കാൻ
@@ -184,12 +183,6 @@ def get_post_keyboard(user_id: int):
         ],
         [
             InlineKeyboardButton(
-                "ഗ്രൂപ്പ്‌",
-                url="https://t.me/+3cAADCEu9Mw1Y2M9"
-            )
-        ],
-        [
-            InlineKeyboardButton(
                 "🚫 Mute User (Admin Only)",
                 callback_data=f"mute_{user_id}"
             )
@@ -201,7 +194,6 @@ async def link_toggle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # അഡ്മിൻ പെർമിഷൻ പരിശോധിക്കുന്നു
     user_status = await context.bot.get_chat_member(chat_id, user.id)
     is_admin = user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']
 
@@ -748,15 +740,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if sent_success:
         thanks_msg = await update.message.reply_text(
-            "✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "ഗ്രൂപ്പ്‌",
-                        url="https://t.me/+3cAADCEu9Mw1Y2M9"
-                    )
-                ]
-            ])
+            "✅ വിജയകരമായി അയച്ചിട്ടുണ്ട്!"
         )
 
         user_last_thanks_msg[user.id] = thanks_msg.message_id
@@ -822,26 +806,12 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ലിങ്കുകൾ ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
         has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
 
-        # ❌ ലിങ്ക് ഇല്ലെങ്കിൽ
+        # ❌ ലിങ്ക് ഇല്ലെങ്കിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്യും
         if not has_link:
             try:
-                # 1. മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
                 await update.message.delete()
             except Exception as e:
                 logging.error(f"Failed to delete text message: {e}")
-
-            try:
-                # 2. യൂസറെ മെൻഷൻ ചെയ്ത് വാണിംഗ് മെസ്സേജ് അയക്കുന്നു
-                warning_msg = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ <a href='tg://user?id={user.id}'>{user.full_name}</a>, ഈ ഗ്രൂപ്പിൽ ലിങ്കുകൾ മാത്രമേ അനുവാദമുള്ളൂ!",
-                    parse_mode="HTML"
-                )
-                
-                # 3. ആക്ഷൻ (Ban/Mute) ഒന്നുമെടുക്കാതെ വാണിംഗ് മെസ്സേജ് അപ്പോൾ തന്നെ ഡിലീറ്റ് ചെയ്യുന്നു
-                await warning_msg.delete()
-            except Exception as e:
-                logging.error(f"Failed to send/delete warning message: {e}")
         return
 
     # 2. ഫിൽട്ടർ ഓഫാക്കുമ്പോൾ ഉള്ള സാധാരണ ഗ്രൂപ്പ് ലോജിക്
@@ -955,8 +925,7 @@ def main():
     bot_app.add_handler(
         MessageHandler(
             filters.ChatType.GROUPS &
-            filters.TEXT &
-            ~filters.COMMAND,
+            filters.TEXT,
             handle_group_text
         )
     )
