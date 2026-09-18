@@ -25,6 +25,7 @@ logging.basicConfig(
 # ----------------- ADMIN / SPECIAL USER / GROUP CONFIG -----------------
 ADMIN_USER_ID = 7965472783
 SPECIAL_USER_ID = 1087968824
+ALLOWED_TEXT_USER_ID = 8975729516  # Text ഫൊർവേഡ് ചെയ്യാൻ അനുവദിച്ചിരിക്കുന്ന യൂസർ ID
 
 TARGET_STRICT_GROUP_ID = -1004376973168  
 
@@ -745,6 +746,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_last_thanks_msg[user.id] = thanks_msg.message_id
 
+# --- 🎯 UPDATED TEXT FORWARDING LOGIC ---
 async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -756,7 +758,8 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    if user_id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
+    # അഡ്മിൻമാർ അല്ലെങ്കിൽ പ്രത്യേകം അനുവദിച്ച USER_ID (8975729516) അയച്ച ടെക്സ്റ്റ് മാത്രം ഫോർവേഡ് ചെയ്യും
+    if user_id in [ADMIN_USER_ID, SPECIAL_USER_ID, ALLOWED_TEXT_USER_ID]:
         text_content = update.message.text
         group_reply_markup = get_post_keyboard(user_id)
 
@@ -780,6 +783,7 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
+    # മറ്റ് ഉപയോക്താക്കൾ ടെക്സ്റ്റ് അയച്ചാൽ ഗ്രൂപ്പിൽ പോകില്ല
     await update.message.reply_text(
         "⚠️ ടെക്സ്റ്റുകളോ ലിങ്കുകളോ അയക്കാൻ പാടില്ല! "
         "ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക."
@@ -898,7 +902,6 @@ def main():
         CommandHandler("send", send_user_photo)
     )
 
-    # 🎯 Single CommandHandler for /link on and /link off
     bot_app.add_handler(
         CommandHandler("link", link_toggle_cmd)
     )
