@@ -29,6 +29,9 @@ SPECIAL_USER_ID = 1087968824
 # 🎯 താങ്കളുടെ ടാർഗെറ്റ് ഗ്രൂപ്പ് ID
 TARGET_STRICT_GROUP_ID = -1004376973168  
 
+# ഗ്രൂപ്പുകളിലെ /link status ഓർത്തു വെക്കാൻ
+link_filter_status = {}
+
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
 
@@ -81,7 +84,7 @@ async def delete_photo_after_delay(
         )
     except Exception as e:
         logging.error(
-            f"Failed to delete photo message {message_id} in {chat_id}: {e}"
+            f"Failed to delete message {message_id} in {chat_id}: {e}"
         )
 
 BOT_TOKEN = os.environ.get(
@@ -192,6 +195,30 @@ def get_post_keyboard(user_id: int):
             )
         ]
     ])
+
+# --- 🎯 NEW: COMMAND HANDLERS FOR LINK FILTER ---
+async def link_on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    # Check if user is admin/special user or group admin
+    user_status = await context.bot.get_chat_member(chat_id, user.id)
+    if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
+        link_filter_status[chat_id] = True
+        await update.message.reply_text("✅ ഈ ഗ്രൂപ്പിൽ Link-Only ഫിൽട്ടർ ഓണാക്കിയിരിക്കുന്നു! ഇനി ലിങ്കുകൾ ഉള്ള മെസ്സേജ് മാത്രം അനുവദിക്കും.")
+    else:
+        await update.message.reply_text("❌ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിൻ പെർമിഷൻ വേണം.")
+
+async def link_off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    
+    user_status = await context.bot.get_chat_member(chat_id, user.id)
+    if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
+        link_filter_status[chat_id] = False
+        await update.message.reply_text("🚫 Link-Only ഫിൽട്ടർ ഓഫാക്കിയിരിക്കുന്നു.")
+    else:
+        await update.message.reply_text("❌ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിൻ പെർമിഷൻ വേണം.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -770,7 +797,7 @@ async def handle_text_or_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         "ദയവായി ഫോട്ടോകൾ മാത്രം അയക്കുക."
     )
 
-# --- 🎯 ഗ്രൂപ്പിലെ ലിങ്ക് ഇല്ലാത്ത ടെക്സ്റ്റുകൾ തടയുന്ന ഫങ്ഷൻ ---
+# --- 🎯 UPDATED: ഗ്രൂപ്പിലെ ലിങ്ക് അല്ലാത്ത മെസ്സേജുകൾ തടയുന്ന ഫങ്ഷൻ ---
 async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -778,38 +805,42 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # 1. ടാർഗെറ്റ് ഗ്രൂപ്പിലെ പരിശോധന
-    if chat_id == TARGET_STRICT_GROUP_ID:
-        # അഡ്മിൻ അല്ലെങ്കിൽ സ്പെഷ്യൽ യൂസർ ആണെങ്കിൽ തടയരുത്
-        if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
-            return
+    # അഡ്മിൻമാർക്ക് ആക്ഷൻ എടുക്കരുത്
+    user_status = await context.bot.get_chat_member(chat_id, user.id)
+    if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
+        return
 
+    # 1. /link on ആണോ അല്ലെങ്കിൽ TARGET_STRICT_GROUP_ID ആണോ എന്ന് ചെക്ക് ചെയ്യുന്നു
+    if link_filter_status.get(chat_id, False) or chat_id == TARGET_STRICT_GROUP_ID:
         text_content = update.message.text or ""
         entities = update.message.entities or []
 
-        # ലിങ്കുകൾ (http/https/t.me) ഉണ്ടോയെന്ന് കർശനമായി ചെക്ക് ചെയ്യുന്നു
-        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+', text_content))
+        # ലിങ്കുകൾ ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
+        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
 
-        # ❌ ലിങ്ക് ഇല്ലെങ്കിൽ മെസ്സേജ് ഡിലീറ്റ് ചെയ്ത് യൂസറെ ഗ്രൂപ്പിൽ നിന്ന് BAN ചെയ്യും
+        # ❌ ലിങ്ക് ഇല്ലെങ്കിൽ
         if not has_link:
             try:
+                # 1. മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
                 await update.message.delete()
             except Exception as e:
                 logging.error(f"Failed to delete text message: {e}")
 
             try:
-                await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
+                # 2. യൂസറെ മെൻഷൻ ചെയ്ത് വാണിംഗ് മെസ്സേജ് അയക്കുന്നു
                 warning_msg = await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"⚠️ <a href='tg://user?id={user.id}'>{user.full_name}</a> എന്ന വ്യക്തി ലിങ്ക് അല്ലാതെ വെറും ടെക്സ്റ്റ് അയച്ചതിനാൽ ഗ്രൂപ്പിൽ നിന്ന് മാറ്റിയിരിക്കുന്നു.\n\n📌 <b>ഈ ഗ്രൂപ്പിൽ ലിങ്കുകൾ മാത്രം ഇടുക!</b>",
+                    text=f"⚠️ <a href='tg://user?id={user.id}'>{user.full_name}</a>, ഈ ഗ്രൂപ്പിൽ ലിങ്കുകൾ മാത്രമേ അനുവാദമുള്ളൂ!",
                     parse_mode="HTML"
                 )
-                asyncio.create_task(delete_photo_after_delay(context, chat_id, warning_msg.message_id, 30))
+                
+                # 3. ആക്ഷൻ (Ban/Mute) ഒന്നുമെടുക്കാതെ വാണിംഗ് മെസ്സേജ് അപ്പോൾ തന്നെ ഡിലീറ്റ് ചെയ്യുന്നു
+                await warning_msg.delete()
             except Exception as e:
-                logging.error(f"Failed to ban member: {e}")
+                logging.error(f"Failed to send/delete warning message: {e}")
         return
 
-    # 2. സാധാരണ ഗ്രൂപ്പുകൾക്കുള്ള പഴയ ലോജിക്
+    # 2. ഫിൽട്ടർ ഓഫാക്കുമ്പോൾ ഉള്ള സാധാരണ ഗ്രൂപ്പ് ലോജിക്
     text_content = update.message.text
     line_count = len(text_content.splitlines())
     has_entities = bool(update.message.entities)
@@ -891,6 +922,15 @@ def main():
 
     bot_app.add_handler(
         CommandHandler("send", send_user_photo)
+    )
+
+    # 🎯 NEW LINK COMMAND HANDLERS
+    bot_app.add_handler(
+        CommandHandler("link", link_on_cmd, filters=filters.Regex(r'^(?i)/link\s+on$'))
+    )
+    
+    bot_app.add_handler(
+        CommandHandler("link", link_off_cmd, filters=filters.Regex(r'^(?i)/link\s+off$'))
     )
 
     bot_app.add_handler(
