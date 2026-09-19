@@ -210,7 +210,7 @@ async def link_toggle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if option == "on":
         link_filter_status[chat_id] = True
-        await update.message.reply_text("✅ ഈ ഗ്രൂപ്പിൽ Link-Only ഫിൽട്ടർ ഓണാക്കിയിരിക്കുന്നു! ഇനി ലിങ്കുകൾ ഉള്ള മെസ്സേജ് മാത്രം അനുവദിക്കും.")
+        await update.message.reply_text("✅ ഈ ഗ്രൂപ്പിൽ Link-Only ഫിൽട്ടർ ഓണാക്കിയിരിക്കുന്നു! ലിങ്ക് അല്ലാത്ത മെസ്സേജുകളും ഫോർവേഡ് മെസ്സേജുകളും അനുവദിക്കില്ല.")
     elif option == "off":
         link_filter_status[chat_id] = False
         await update.message.reply_text("🚫 Link-Only ഫിൽട്ടർ ഓഫാക്കിയിരിക്കുന്നു.")
@@ -794,13 +794,40 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # അഡ്മിൻമാർക്ക് ബാധകമല്ല
+    # അഡ്മിൻമാർക്ക് ഫിൽട്ടർ ബാധകമല്ല
     user_status = await context.bot.get_chat_member(chat_id, user.id)
     if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
         return
 
-    # 🎯 1. പ്രത്യേക ഗ്രൂപ്പ് (SPECIAL_STRICT_GROUP_ID) ഫിൽട്ടർ (-1004313629331)
+    # 🎯 1. SPECIAL_STRICT_GROUP_ID (-1004313629331) ഫിൽട്ടർ
     if chat_id == SPECIAL_STRICT_GROUP_ID:
+        is_link_on = link_filter_status.get(chat_id, False)
+        
+        # /link on ആണെങ്കിൽ മാത്രം ലിങ്ക് ലിമിറ്റേഷൻ വരും
+        if is_link_on:
+            text_content = update.message.text or ""
+            entities = update.message.entities or []
+
+            has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
+            is_forwarded = bool(update.message.forward_date or update.message.forward_from or update.message.forward_from_chat)
+
+            # ലിങ്ക് ഇല്ലെങ്കിലോ ഫോർവേഡ് ചെയ്തതാണെങ്കിലോ ഡിലീറ്റ് ചെയ്യും
+            if not has_link or is_forwarded:
+                try:
+                    await update.message.delete()
+                    user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+                    warn_msg = await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ ഫോർവേഡ് ചെയ്യാത്ത <b>Link</b> മാത്രം ഇടുക!",
+                        parse_mode="HTML"
+                    )
+                    await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
+                except Exception as e:
+                    logging.error(f"Error in SPECIAL_STRICT_GROUP_ID text filter: {e}")
+        return
+
+    # 🎯 2. മറ്റ് /link on അല്ലെങ്കിൽ TARGET_STRICT_GROUP_ID ലോജിക്
+    if link_filter_status.get(chat_id, False) or chat_id == TARGET_STRICT_GROUP_ID:
         text_content = update.message.text or ""
         entities = update.message.entities or []
 
@@ -808,36 +835,12 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_forwarded = bool(update.message.forward_date or update.message.forward_from or update.message.forward_from_chat)
 
         if not has_link or is_forwarded:
-            async def process_strict_violation():
-                try:
-                    await update.message.delete()
-                    user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
-                    warn_msg = await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ <b>Link</b> മാത്രം ഇടുക! ഫോർവേഡ് ചെയ്ത മെസ്സേജുകളോ മറ്റ് ടെക്സ്റ്റുകളോ അനുവദിക്കില്ല.",
-                        parse_mode="HTML"
-                    )
-                    await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
-                except Exception as e:
-                    logging.error(f"Error in SPECIAL_STRICT_GROUP_ID: {e}")
-
-            asyncio.create_task(process_strict_violation())
-        return
-
-    # 🎯 2. സാധാരണ /link on അല്ലെങ്കിൽ TARGET_STRICT_GROUP_ID ലോജിക്
-    if link_filter_status.get(chat_id, False) or chat_id == TARGET_STRICT_GROUP_ID:
-        text_content = update.message.text or ""
-        entities = update.message.entities or []
-
-        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
-
-        if not has_link:
             try:
                 await update.message.delete()
                 user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
                 warn_msg = await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ <b>Link</b> ഉള്ള മെസ്സേജുകൾ മാത്രം ഇടുക!",
+                    text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ ഫോർവേഡ് ചെയ്യാത്ത <b>Link</b> മാത്രം ഇടുക!",
                     parse_mode="HTML"
                 )
                 await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
@@ -845,7 +848,7 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logging.error(f"Failed to delete text message: {e}")
         return
 
-    # 3. സാധാരണ ഗ്രൂപ്പ് ലോജിക്
+    # 3. സാധാരണ ഗ്രൂപ്പ് ലോജിക് (വലിയ മെസ്സേജുകൾ ഒഴിവാക്കാൻ)
     text_content = update.message.text
     line_count = len(text_content.splitlines())
     has_entities = bool(update.message.entities)
@@ -863,32 +866,43 @@ async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # SPECIAL_STRICT_GROUP_ID-ൽ ഫോട്ടോകൾ ഡിലീറ്റ് ചെയ്യുന്നു
+    # അഡ്മിൻമാർ അയക്കുന്ന ഫോട്ടോ ഡിലീറ്റ് ചെയ്യേണ്ടതില്ല
+    user_status = await context.bot.get_chat_member(chat_id, user.id)
+    if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
+        return
+
+    # 🎯 SPECIAL_STRICT_GROUP_ID (-1004313629331) ഫോട്ടോ ലോജിക്:
+    # ഈ ഗ്രൂപ്പിൽ ഫോട്ടോകൾ (Direct photos / Forwarded photos) അനുവദിക്കില്ല
     if chat_id == SPECIAL_STRICT_GROUP_ID:
-        user_status = await context.bot.get_chat_member(chat_id, user.id)
-        if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
-            return
+        try:
+            await update.message.delete()
+            user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+            warn_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ ഫോട്ടോകൾ അനുവദിക്കില്ല!",
+                parse_mode="HTML"
+            )
+            await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
+        except Exception as e:
+            logging.error(f"Failed to delete photo in SPECIAL_STRICT_GROUP_ID: {e}")
+        return
 
-        async def process_photo_violation():
-            try:
-                await update.message.delete()
-                user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
-                warn_msg = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ <b>Link</b> മാത്രം ഇടുക!",
-                    parse_mode="HTML"
-                )
-                await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
-            except Exception as e:
-                logging.error(f"Failed to delete photo in SPECIAL_STRICT_GROUP_ID: {e}")
-
-        asyncio.create_task(process_photo_violation())
+    # /link on ആക്കിയ മറ്റ് ഗ്രൂപ്പുകളിൽ ഫോട്ടോ ഫിൽട്ടർ
+    if link_filter_status.get(chat_id, False):
+        try:
+            await update.message.delete()
+            user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+            warn_msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ ഫോട്ടോകൾ അനുവദിക്കില്ല! <b>Link</b> മാത്രം ഇടുക.",
+                parse_mode="HTML"
+            )
+            await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
+        except Exception as e:
+            logging.error(f"Failed to delete photo in link-mode group: {e}")
         return
 
     if chat_id == TARGET_STRICT_GROUP_ID:
-        if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID]:
-            return
-
         if update.message.forward_date or update.message.forward_from or update.message.forward_from_chat:
             try:
                 await update.message.delete()
