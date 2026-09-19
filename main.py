@@ -28,15 +28,10 @@ SPECIAL_USER_ID = 1087968824
 ALLOWED_TEXT_USER_ID = 8975729516  
 
 TARGET_STRICT_GROUP_ID = -1004376973168  
-
-# 🎯 താങ്കൾ നൽകിയ പുതിയ ഗ്രൂപ്പ് ID:
 SPECIAL_STRICT_GROUP_ID = -1004313629331  
 
 # ഗ്രൂപ്പുകളിലെ /link status ഓർത്തു വെക്കാൻ
 link_filter_status = {}
-
-# 🎯 Dynamic ലിങ്ക്-ഓൺലി മോഡ് സേവ് ചെയ്തു വെക്കാൻ (Group-Specific)
-link_only_groups = set()
 
 # ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask(__name__)
@@ -195,36 +190,6 @@ def get_post_keyboard(user_id: int):
             )
         ]
     ])
-
-# 🎯 ലിങ്ക്-ഓൺലി ഫീച്ചർ ഓൺ/ഓഫ് ചെയ്യുന്ന കമാൻഡ്
-async def toggle_link_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    user = update.effective_user
-
-    if chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("❌ ഈ കമാൻഡ് ഗ്രൂപ്പുകളിൽ മാത്രമേ ഉപയോഗിക്കാൻ സാധിക്കൂ.")
-        return
-
-    # അഡ്മിൻ പെർമിഷൻ പരിശോധിക്കുന്നു
-    user_status = await context.bot.get_chat_member(chat.id, user.id)
-    if user.id not in [ADMIN_USER_ID, SPECIAL_USER_ID] and user_status.status not in ['administrator', 'creator']:
-        await update.message.reply_text("❌ ഈ കമാൻഡ് ഉപയോഗിക്കാൻ അഡ്മിൻ പെർമിഷൻ വേണം.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: `/linkmode on` അല്ലെങ്കിൽ `/linkmode off`", parse_mode="Markdown")
-        return
-
-    arg = context.args[0].lower().strip()
-
-    if arg == "on":
-        link_only_groups.add(chat.id)
-        await update.message.reply_text("✅ ഈ ഗ്രൂപ്പിൽ **Link-Only Mode** ആക്ടീവ് ആക്കി! ഇനി ലിങ്കുകൾ ഉള്ള മെസ്സേജുകൾ മാത്രം അനുവദിക്കും, ടെക്സ്റ്റുകൾ ഡിലീറ്റ് ചെയ്യപ്പെടും.", parse_mode="Markdown")
-    elif arg == "off":
-        link_only_groups.discard(chat.id)
-        await update.message.reply_text("🚫 ഈ ഗ്രൂപ്പിൽ **Link-Only Mode** ഡിസാക്ടീവ് ആക്കി.", parse_mode="Markdown")
-    else:
-        await update.message.reply_text("⚠️ ഉപയോഗിക്കേണ്ട രീതി: `/linkmode on` അല്ലെങ്കിൽ `/linkmode off`", parse_mode="Markdown")
 
 async def link_toggle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -834,31 +799,14 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
         return
 
-    text_content = update.message.text or ""
-    entities = update.message.entities or []
-    has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
-
-    # 🎯 dynamic ആയി /linkmode on ആക്കിയ ഗ്രൂപ്പുകളിലെ ഫിൽട്ടർ
-    if chat_id in link_only_groups:
-        if not has_link:
-            try:
-                await update.message.delete()
-                user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
-                warn_msg = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ <b>Link</b> മാത്രം ഇടുക!",
-                    parse_mode="HTML"
-                )
-                await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
-            except Exception as e:
-                logging.error(f"Failed to delete text message in linkmode: {e}")
-            return
-
     # 🎯 1. പ്രത്യേക ഗ്രൂപ്പ് (SPECIAL_STRICT_GROUP_ID) ഫിൽട്ടർ (-1004313629331)
     if chat_id == SPECIAL_STRICT_GROUP_ID:
+        text_content = update.message.text or ""
+        entities = update.message.entities or []
+
+        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
         is_forwarded = bool(update.message.forward_date or update.message.forward_from or update.message.forward_from_chat)
 
-        # ❌ ലിങ്ക് ഇല്ലെങ്കിലോ ഫോർവേഡ് മെസ്സേജ് ആണെങ്കിലോ സ്പോട്ടിൽ ഡിലീറ്റ് ചെയ്ത് വാണിംഗ് നൽകും
         if not has_link or is_forwarded:
             async def process_strict_violation():
                 try:
@@ -876,16 +824,29 @@ async def handle_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             asyncio.create_task(process_strict_violation())
         return
 
-    # 2. സാധാരണ /link on അല്ലെങ്കിൽ TARGET_STRICT_GROUP_ID ലോജിക്
+    # 🎯 2. സാധാരണ /link on അല്ലെങ്കിൽ TARGET_STRICT_GROUP_ID ലോജിക്
     if link_filter_status.get(chat_id, False) or chat_id == TARGET_STRICT_GROUP_ID:
+        text_content = update.message.text or ""
+        entities = update.message.entities or []
+
+        has_link = any(e.type in ["url", "text_link"] for e in entities) or bool(re.search(r'https?://[^\s]+|t\.me/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text_content))
+
         if not has_link:
             try:
                 await update.message.delete()
+                user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+                warn_msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⚠️ {user_mention}, ഈ ഗ്രൂപ്പിൽ <b>Link</b> ഉള്ള മെസ്സേജുകൾ മാത്രം ഇടുക!",
+                    parse_mode="HTML"
+                )
+                await delete_photo_after_delay(context, chat_id, warn_msg.message_id, 10)
             except Exception as e:
                 logging.error(f"Failed to delete text message: {e}")
         return
 
     # 3. സാധാരണ ഗ്രൂപ്പ് ലോജിക്
+    text_content = update.message.text
     line_count = len(text_content.splitlines())
     has_entities = bool(update.message.entities)
 
@@ -902,7 +863,7 @@ async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    # 🎯 SPECIAL_STRICT_GROUP_ID-ൽ ഫോട്ടോകൾ സ്പോട്ടിൽ ഡിലീറ്റ് ചെയ്യുന്നു
+    # SPECIAL_STRICT_GROUP_ID-ൽ ഫോട്ടോകൾ ഡിലീറ്റ് ചെയ്യുന്നു
     if chat_id == SPECIAL_STRICT_GROUP_ID:
         user_status = await context.bot.get_chat_member(chat_id, user.id)
         if user.id in [ADMIN_USER_ID, SPECIAL_USER_ID] or user_status.status in ['administrator', 'creator']:
@@ -962,9 +923,6 @@ def main():
     bot_app.add_handler(CommandHandler("unwarn", unwarn_user))
     bot_app.add_handler(CommandHandler("send", send_user_photo))
     bot_app.add_handler(CommandHandler("link", link_toggle_cmd))
-    
-    # 🎯 പുതിയ കമാൻഡ് ഹാൻഡ്‌ലർ
-    bot_app.add_handler(CommandHandler("linkmode", toggle_link_mode))
 
     bot_app.add_handler(CallbackQueryHandler(handle_button_callback))
 
